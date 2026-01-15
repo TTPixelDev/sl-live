@@ -8,9 +8,8 @@ const DB_VERSION = 1;
 const STATIC_TS_KEY = 'sl_static_timestamp_v2';
 const CACHE_DURATION = 1000 * 60 * 60 * 24 * 7; 
 
-const RT_API_URL = '/api/gtfs-rt';
-
-const areKeysConfigured = () => true; 
+const RT_VEHICLE_URL = '/api/gtfs-rt';
+const RT_TRIP_UPDATES_URL = '/api/trip-updates';
 
 export interface LineManifestEntry {
     id: string;
@@ -27,7 +26,7 @@ class SLService {
   private tripToRouteMap: Record<string, string> | null = null;
 
   public areKeysConfigured(): boolean {
-    return areKeysConfigured();
+    return true; 
   }
 
   private async getDB(): Promise<IDBDatabase> {
@@ -103,70 +102,6 @@ class SLService {
     }
   }
   
-  private async searchLines(query: string, db: IDBDatabase): Promise<SearchResult[]> {
-    return new Promise<SearchResult[]>(resolve => {
-        const results: SearchResult[] = [];
-        const tx = db.transaction('routes', 'readonly');
-        const store = tx.objectStore('routes');
-        store.index('line').openCursor().onsuccess = (event) => {
-            const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
-            if (cursor) {
-                const route = cursor.value as LineManifestEntry;
-                if (route.line.toLowerCase().startsWith(query)) {
-                    results.push({ type: 'line', id: route.id, title: `Linje ${route.line}`, subtitle: `${route.from} - ${route.to}` });
-                }
-                 if (results.length < 10) cursor.continue(); else resolve(results);
-            } else {
-                resolve(results);
-            }
-        };
-    });
-  }
-
-  private async searchStops(query: string, db: IDBDatabase): Promise<SearchResult[]> {
-    const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-      const R = 6371e3; // meter
-      const φ1 = lat1 * Math.PI/180;
-      const φ2 = lat2 * Math.PI/180;
-      const Δφ = (lat2-lat1) * Math.PI/180;
-      const Δλ = (lon2-lon1) * Math.PI/180;
-      const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
-                Math.cos(φ1) * Math.cos(φ2) *
-                Math.sin(Δλ/2) * Math.sin(Δλ/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      return R * c;
-    };
-
-    return new Promise<SearchResult[]>(resolve => {
-        const results: SearchResult[] = [];
-        const existingResultsByLocation: Map<string, {lat: number, lng: number}[]> = new Map();
-        
-        const tx = db.transaction('stops', 'readonly');
-        const store = tx.objectStore('stops');
-        store.index('name').openCursor().onsuccess = (event) => {
-            const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
-            if (cursor) {
-                const stop = cursor.value as SLStop;
-                const stopName = stop.name;
-                
-                if (stopName.toLowerCase().includes(query)) {
-                    const nearbyPoints = existingResultsByLocation.get(stopName) || [];
-                    const isTooClose = nearbyPoints.some(p => getDistance(p.lat, p.lng, stop.lat, stop.lng) < 500);
-                    
-                    if (!isTooClose) {
-                        if (!existingResultsByLocation.has(stopName)) existingResultsByLocation.set(stopName, []);
-                        existingResultsByLocation.get(stopName)!.push({lat: stop.lat, lng: stop.lng});
-                        results.push({ type: 'stop', id: stop.id, title: stopName, subtitle: `Hållplats` });
-                    }
-                }
-                if (results.length < 10) cursor.continue(); else resolve(results);
-            } else {
-                resolve(results);
-            }
-        };
-    });
-  }
-  
   async search(query: string, activeRoute?: SLLineRoute | null): Promise<SearchResult[]> {
     await this.initialize();
     if (query.trim().length < 1) return [];
@@ -193,6 +128,46 @@ class SLService {
         this.searchLines(q, db)
     ]);
     return [...lines, ...stops].slice(0, 15);
+  }
+
+  private async searchLines(query: string, db: IDBDatabase): Promise<SearchResult[]> {
+    return new Promise<SearchResult[]>(resolve => {
+        const results: SearchResult[] = [];
+        const tx = db.transaction('routes', 'readonly');
+        const store = tx.objectStore('routes');
+        store.index('line').openCursor().onsuccess = (event) => {
+            const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+            if (cursor) {
+                const route = cursor.value as LineManifestEntry;
+                if (route.line.toLowerCase().startsWith(query)) {
+                    results.push({ type: 'line', id: route.id, title: `Linje ${route.line}`, subtitle: `${route.from} - ${route.to}` });
+                }
+                 if (results.length < 10) cursor.continue(); else resolve(results);
+            } else {
+                resolve(results);
+            }
+        };
+    });
+  }
+
+  private async searchStops(query: string, db: IDBDatabase): Promise<SearchResult[]> {
+    return new Promise<SearchResult[]>(resolve => {
+        const results: SearchResult[] = [];
+        const tx = db.transaction('stops', 'readonly');
+        const store = tx.objectStore('stops');
+        store.index('name').openCursor().onsuccess = (event) => {
+            const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+            if (cursor) {
+                const stop = cursor.value as SLStop;
+                if (stop.name.toLowerCase().includes(query)) {
+                    results.push({ type: 'stop', id: stop.id, title: stop.name, subtitle: `Hållplats` });
+                }
+                if (results.length < 10) cursor.continue(); else resolve(results);
+            } else {
+                resolve(results);
+            }
+        };
+    });
   }
 
   async getLineRoute(routeId: string): Promise<SLLineRoute | null> {
@@ -245,56 +220,91 @@ class SLService {
   async getLiveVehicles(route?: SLLineRoute | null): Promise<SLVehicle[]> {
     if (!route || !this.tripToRouteMap) return [];
 
-    const response = await fetch(RT_API_URL);
-    if (!response.ok) throw new Error(`API Error: ${response.status}`);
-    
-    const buffer = await response.arrayBuffer();
-    if (buffer.byteLength < 20) return [];
+    try {
+        const [posRes, updatesRes] = await Promise.all([
+            fetch(RT_VEHICLE_URL),
+            fetch(RT_TRIP_UPDATES_URL).catch(() => null)
+        ]);
 
-    const root = await this.getRTRoot();
-    const FeedMessage = root.lookupType("transit_realtime.FeedMessage");
-    const message = FeedMessage.decode(new Uint8Array(buffer));
-    const decodedObject = FeedMessage.toObject(message, { enums: String, longs: String });
-    const entities = decodedObject.entity || [];
-    
-    const allVehicles: SLVehicle[] = [];
-    for (const e of entities) {
-        const v = e.vehicle;
-        if (!v || !v.position || !v.trip) continue;
-
-        const tripId = v.trip.tripId || v.trip.trip_id;
-        if (!tripId) continue;
+        if (!posRes.ok) throw new Error(`API Error: ${posRes.status}`);
         
-        let routeId = v.trip.routeId || v.trip.route_id;
-        if (!routeId) {
-            routeId = this.tripToRouteMap[tripId];
+        const posBuffer = await posRes.arrayBuffer();
+        if (posBuffer.byteLength < 20) return [];
+
+        const root = await this.getRTRoot();
+        const FeedMessage = root.lookupType("transit_realtime.FeedMessage");
+        
+        // Dekoda fordonspositioner
+        const posMessage = FeedMessage.decode(new Uint8Array(posBuffer));
+        const posObject = FeedMessage.toObject(posMessage, { enums: String, longs: String });
+        const posEntities = posObject.entity || [];
+
+        // Försök dekoda förseningar
+        const delaysMap: Map<string, number> = new Map();
+        if (updatesRes && updatesRes.ok) {
+            const updatesBuffer = await updatesRes.arrayBuffer();
+            const updatesMessage = FeedMessage.decode(new Uint8Array(updatesBuffer));
+            const updatesObject = FeedMessage.toObject(updatesMessage, { enums: String, longs: String });
+            const updateEntities = updatesObject.entity || [];
+
+            for (const e of updateEntities) {
+                if (e.tripUpdate && e.tripUpdate.trip) {
+                    const tripId = e.tripUpdate.trip.tripId || e.tripUpdate.trip.trip_id;
+                    if (tripId && e.tripUpdate.stopTimeUpdate) {
+                        // Vi tar den senaste kända förseningen i resan
+                        const latestUpdate = e.tripUpdate.stopTimeUpdate[0];
+                        if (latestUpdate && latestUpdate.arrival && latestUpdate.arrival.delay !== undefined) {
+                            delaysMap.set(tripId, parseInt(latestUpdate.arrival.delay));
+                        } else if (latestUpdate && latestUpdate.departure && latestUpdate.departure.delay !== undefined) {
+                            delaysMap.set(tripId, parseInt(latestUpdate.departure.delay));
+                        }
+                    }
+                }
+            }
         }
-        if (!routeId) continue;
+        
+        const allVehicles: SLVehicle[] = [];
+        for (const e of posEntities) {
+            const v = e.vehicle;
+            if (!v || !v.position || !v.trip) continue;
 
-        allVehicles.push({
-            id: v.vehicle?.id || e.id,
-            line: routeId,
-            tripId: tripId,
-            operator: "SL / Entreprenör",
-            vehicleNumber: v.vehicle?.label || "N/A",
-            lat: v.position.latitude,
-            lng: v.position.longitude,
-            bearing: v.position.bearing || 0,
-            speed: (v.position.speed || 0) * 3.6,
-            destination: "Okänd",
-            type: "Buss"
-        });
+            const tripId = v.trip.tripId || v.trip.trip_id;
+            if (!tripId) continue;
+            
+            let routeId = v.trip.routeId || v.trip.route_id;
+            if (!routeId) {
+                routeId = this.tripToRouteMap[tripId];
+            }
+            if (!routeId) continue;
+
+            allVehicles.push({
+                id: v.vehicle?.id || e.id,
+                line: routeId,
+                tripId: tripId,
+                operator: "SL / Entreprenör",
+                vehicleNumber: v.vehicle?.label || "N/A",
+                lat: v.position.latitude,
+                lng: v.position.longitude,
+                bearing: v.position.bearing || 0,
+                speed: (v.position.speed || 0) * 3.6,
+                destination: "Okänd",
+                type: "Buss",
+                delay: delaysMap.get(tripId)
+            });
+        }
+
+        const tripIdSet = new Set(route.trip_ids);
+        let filteredVehicles = allVehicles.filter(v => tripIdSet.has(v.tripId));
+        
+        if (filteredVehicles.length === 0 && allVehicles.length > 0) {
+          filteredVehicles = allVehicles.filter(v => v.line === route.id);
+        }
+
+        return filteredVehicles;
+    } catch(e) {
+        console.error("Fel vid hämtning av realtidsdata:", e);
+        return [];
     }
-
-    const tripIdSet = new Set(route.trip_ids);
-    let filteredVehicles = allVehicles.filter(v => tripIdSet.has(v.tripId));
-    
-    if (filteredVehicles.length === 0 && allVehicles.length > 0) {
-      const fallbackVehicles = allVehicles.filter(v => v.line === route.id);
-      filteredVehicles = fallbackVehicles;
-    }
-
-    return filteredVehicles;
   }
   
   private async getRTRoot() {
@@ -306,10 +316,12 @@ class SLService {
       message FeedHeader { required string gtfs_realtime_version = 1; optional Incrementality incrementality = 2 [default = FULL_DATASET]; optional uint64 timestamp = 3; enum Incrementality { FULL_DATASET = 0; DIFFERENTIAL = 1; } }
       message FeedEntity { required string id = 1; optional bool is_deleted = 2 [default = false]; optional TripUpdate trip_update = 3; optional VehiclePosition vehicle = 4; optional Alert alert = 5; }
       message VehiclePosition { optional TripDescriptor trip = 1; optional VehicleDescriptor vehicle = 8; optional Position position = 2; optional uint64 timestamp = 5; }
+      message TripUpdate { optional TripDescriptor trip = 1; repeated StopTimeUpdate stop_time_update = 2; }
+      message StopTimeUpdate { optional uint32 stop_sequence = 1; optional string stop_id = 4; optional StopTimeEvent arrival = 2; optional StopTimeEvent departure = 3; }
+      message StopTimeEvent { optional int32 delay = 1; optional int64 time = 2; optional int32 uncertainty = 3; }
       message TripDescriptor { optional string trip_id = 1; optional string route_id = 5; }
       message VehicleDescriptor { optional string id = 1; optional string label = 2; optional string license_plate = 3; }
       message Position { required float latitude = 1; required float longitude = 2; optional float bearing = 3; optional float speed = 5; }
-      message TripUpdate {}
       message Alert {}
     `).root;
     return this.rtRoot;

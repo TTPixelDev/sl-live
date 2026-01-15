@@ -35,11 +35,33 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
   const vehicleNumber = vehicle.id.slice(-4);
   const roundedSpeed = Math.round(vehicle.speed);
 
+  // Formatera försening
+  const getDelayInfo = () => {
+    if (vehicle.delay === undefined) return { text: "Ingen info", color: "text-gray-400" };
+    
+    const delayMin = Math.round(vehicle.delay / 60);
+    
+    if (Math.abs(vehicle.delay) < 30) {
+      return { text: "I tid", color: "text-emerald-600" };
+    }
+    
+    if (vehicle.delay > 0) {
+      return { text: `${delayMin} min sen`, color: "text-red-600" };
+    } else {
+      return { text: `${Math.abs(delayMin)} min tidig`, color: "text-blue-600" };
+    }
+  };
+
+  const delayStatus = getDelayInfo();
+
   return (
     <div className="p-3 bg-white min-w-[220px] text-gray-800 font-sans shadow-sm">
       <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
         <div className="font-semibold text-gray-400 uppercase tracking-tighter">Linje</div>
         <div className="text-right font-bold text-blue-600 truncate pr-5">{lineText}</div>
+
+        <div className="font-semibold text-gray-400 uppercase tracking-tighter">Punktlighet</div>
+        <div className={`text-right font-bold ${delayStatus.color}`}>{delayStatus.text}</div>
 
         <div className="font-semibold text-gray-400 uppercase tracking-tighter">Entreprenör</div>
         <div className="text-right font-medium">{company}</div>

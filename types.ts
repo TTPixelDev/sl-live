@@ -19,6 +19,7 @@ export interface SLVehicle {
   speed: number;
   destination: string;
   type: 'Buss' | 'Tåg' | 'Tunnelbana' | 'Spårvagn';
+  delay?: number; // Försening i sekunder
 }
 
 export interface SLLineRoute {
