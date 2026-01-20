@@ -22,7 +22,6 @@ const DEFAULT_VIEW: { center: [number, number]; zoom: number; bounds?: L.LatLngB
   bounds: undefined
 };
 
-// Fix: Added interface for AutoOpenMarker props to resolve typing issues and avoid 'any'
 interface AutoOpenMarkerProps {
   position: [number, number];
   stopId: string;
@@ -47,7 +46,6 @@ const AutoOpenMarker: React.FC<AutoOpenMarkerProps> = ({ position, stopId, child
   );
 };
 
-// Fix: Defined interface for VehicleMarker props to resolve "key" property error in App.tsx line 325
 interface VehicleMarkerProps {
   vehicle: SLVehicle;
   lineShortName: string;
@@ -140,6 +138,7 @@ const App: React.FC = () => {
   const [mapConfig, setMapConfig] = useState(DEFAULT_VIEW);
   const [routeManifest, setRouteManifest] = useState<Map<string, LineManifestEntry>>(new Map());
   const [liveStatus, setLiveStatus] = useState<'loading' | 'ok' | 'error'>('loading');
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     const init = async () => {
@@ -182,10 +181,20 @@ const App: React.FC = () => {
     setSelectedVehicleId(null);
     setLiveStatus('loading');
     setMapConfig(DEFAULT_VIEW);
+    setSearchQuery(''); // Rensa sökfältet
   };
 
   const handleSearchSelect = async (result: SearchResult) => {
     setSelectedVehicleId(null);
+    
+    // Om det är en linje, rensa sökfältet så man kan söka på hållplatser på linjen
+    // Om det är en hållplats, fyll i namnet
+    if (result.type === 'line') {
+      setSearchQuery('');
+    } else {
+      setSearchQuery(result.title);
+    }
+    
     if (result.type === 'line') {
       setLoading(true);
       setLiveStatus('loading');
@@ -250,19 +259,19 @@ const App: React.FC = () => {
   return (
     <div className="relative w-full h-full bg-slate-100">
       {isApiConfigured === false && <ApiKeyWarning />}
-      <SearchBar onSelect={handleSearchSelect} onClear={handleClear} activeRoute={activeRoute} />
+      <SearchBar 
+        onSelect={handleSearchSelect} 
+        onClear={handleClear} 
+        activeRoute={activeRoute}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        placeholder={activeRoute ? "Sök hållplats på linjen..." : "Sök linje eller hållplats..."}
+      />
 
-      <div className="absolute bottom-6 left-6 z-[1000] flex flex-col gap-3 pointer-events-none">
-        <div className="bg-slate-900/90 backdrop-blur-xl border border-white/10 p-4 rounded-2xl shadow-2xl flex items-center gap-4 min-w-[240px]">
-          <div className={`w-3 h-3 rounded-full ${activeRoute ? (liveStatus === 'ok' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500') : 'bg-slate-600'}`}></div>
-          <div>
-            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">Live Status</div>
-            <div className="text-sm font-semibold text-white">{getStatusText()}</div>
-          </div>
-        </div>
-        
-        {activeRoute && (
-          <div className="flex items-center gap-2 pointer-events-auto">
+      {/* Flyttat Linje-chip till toppen under sökfältet. Z-index sänkt till 900 så det hamnar under söklistan. */}
+      {activeRoute && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[900] flex items-center justify-center pointer-events-auto">
+          <div className="flex items-center gap-2">
             <div className="bg-blue-600 px-5 py-3 rounded-2xl text-white shadow-xl flex items-center gap-3 border border-blue-400/30">
               <MapIcon className="w-5 h-5 flex-shrink-0" />
               <span className="font-bold text-sm tracking-wide whitespace-nowrap">
@@ -277,7 +286,18 @@ const App: React.FC = () => {
               <X className="w-5 h-5" />
             </button>
           </div>
-        )}
+        </div>
+      )}
+
+      {/* Status-rutan kvar nere i hörnet, utan linje-chippet */}
+      <div className="absolute bottom-6 left-6 z-[1000] flex flex-col gap-3 pointer-events-none">
+        <div className="bg-slate-900/90 backdrop-blur-xl border border-white/10 p-4 rounded-2xl shadow-2xl flex items-center gap-4 min-w-[240px]">
+          <div className={`w-3 h-3 rounded-full ${activeRoute ? (liveStatus === 'ok' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500') : 'bg-slate-600'}`}></div>
+          <div>
+            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">Live Status</div>
+            <div className="text-sm font-semibold text-white">{getStatusText()}</div>
+          </div>
+        </div>
       </div>
 
       <MapContainer center={mapConfig.center} zoom={mapConfig.zoom} zoomControl={false} className="w-full h-full">

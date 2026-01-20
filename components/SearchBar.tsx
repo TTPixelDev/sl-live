@@ -8,27 +8,47 @@ interface SearchBarProps {
   onSelect: (result: SearchResult) => void;
   onClear: () => void;
   activeRoute: SLLineRoute | null;
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
+  placeholder?: string;
 }
 
-const SearchBar: React.FC<SearchBarProps> = ({ onSelect, onClear, activeRoute }) => {
-  const [query, setQuery] = useState('');
+const SearchBar: React.FC<SearchBarProps> = ({ 
+  onSelect, 
+  onClear, 
+  activeRoute, 
+  searchQuery, 
+  onSearchChange,
+  placeholder = "Sök linje eller hållplats..." 
+}) => {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  
+  // Ref för att spåra om vi precis har gjort ett val.
+  // Detta förhindrar att dropdown-menyn öppnas igen när input-värdet uppdateras efter ett klick.
+  const isSelectingRef = useRef(false);
 
   useEffect(() => {
     const fetchResults = async () => {
-      if (query.trim().length > 0) {
-        const res = await slService.search(query, activeRoute);
+      if (searchQuery.trim().length > 0) {
+        const res = await slService.search(searchQuery, activeRoute);
         setResults(res);
-        setShowDropdown(true);
+        
+        // Öppna bara dropdown om vi inte precis har valt något
+        if (!isSelectingRef.current) {
+          setShowDropdown(true);
+        }
+        
+        // Återställ flaggan efter att effekten kört klart
+        isSelectingRef.current = false;
       } else {
         setResults([]);
         setShowDropdown(false);
       }
     };
     fetchResults();
-  }, [query, activeRoute]);
+  }, [searchQuery, activeRoute]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -41,21 +61,28 @@ const SearchBar: React.FC<SearchBarProps> = ({ onSelect, onClear, activeRoute })
   }, []);
 
   return (
-    <div ref={containerRef} className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] w-full max-w-md px-4">
+    <div ref={containerRef} className="absolute top-4 left-1/2 -translate-x-1/2 z-[2000] w-full max-w-md px-4">
       <div className="relative bg-zinc-900/90 backdrop-blur-md rounded-2xl shadow-2xl border border-white/10 overflow-hidden">
         <div className="flex items-center px-4 py-3 gap-3">
           <Search className="w-5 h-5 text-zinc-400" />
           <input
             type="text"
             className="flex-1 bg-transparent text-white outline-none placeholder:text-zinc-500 text-sm"
-            placeholder="Sök linje eller hållplats..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onFocus={() => query.length > 0 && setShowDropdown(true)}
+            placeholder={placeholder}
+            value={searchQuery}
+            onChange={(e) => {
+              // Om användaren skriver manuellt, se till att vi tillåter dropdown att öppnas
+              isSelectingRef.current = false;
+              onSearchChange(e.target.value);
+            }}
+            onFocus={() => {
+                // Öppna dropdown vid fokus om det finns text och vi inte precis valt något
+                if (searchQuery.length > 0) setShowDropdown(true);
+            }}
           />
-          {query && (
+          {searchQuery && (
             <button 
-              onClick={() => { setQuery(''); onClear(); }}
+              onClick={() => { onSearchChange(''); onClear(); }}
               className="p-1 hover:bg-zinc-800 rounded-full transition-colors"
             >
               <X className="w-4 h-4 text-zinc-400" />
@@ -69,8 +96,8 @@ const SearchBar: React.FC<SearchBarProps> = ({ onSelect, onClear, activeRoute })
               <button
                 key={`${result.type}-${result.id}`}
                 onClick={() => {
+                  isSelectingRef.current = true; // Flagga att vi gör ett val
                   onSelect(result);
-                  setQuery(result.title);
                   setShowDropdown(false);
                 }}
                 className="w-full flex items-center gap-4 px-4 py-3 hover:bg-white/5 transition-colors text-left"

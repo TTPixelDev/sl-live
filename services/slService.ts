@@ -64,21 +64,40 @@ class SLService {
     this.isInitialized = true;
   }
 
+  private isJson(response: Response) {
+    const contentType = response.headers.get('content-type');
+    return contentType && contentType.includes('application/json');
+  }
+
   private async loadTripToRouteMap() {
     try {
         const response = await fetch('/data/trip-to-route.json');
+        // Kontrollera både OK status och att det faktiskt är JSON (inte HTML fallback)
+        if (!response.ok || !this.isJson(response)) {
+            console.warn(`Trip-to-route map missing or invalid type (${response.status}). Realtime mapping might be incomplete.`);
+            return;
+        }
         this.tripToRouteMap = await response.json();
     } catch(e) {
-        console.error("Kunde inte ladda trip-till-rutt-mappning:", e);
+        console.warn("Kunde inte ladda trip-till-rutt-mappning (ignorerar om filen saknas lokalt):", e);
     }
   }
 
   private async loadStaticDataFromFiles() {
     try {
-      const [manifest, stops] = await Promise.all([
-        fetch('/data/manifest.json').then(res => res.json()),
-        fetch('/data/stops.json').then(res => res.json())
+      const [manifestRes, stopsRes] = await Promise.all([
+        fetch('/data/manifest.json'),
+        fetch('/data/stops.json')
       ]);
+
+      // Strikt kontroll: Måste vara 200 OK OCH vara JSON.
+      // Detta förhindrar krasch om Vite serverar index.html för saknade filer.
+      if (!manifestRes.ok || !stopsRes.ok || !this.isJson(manifestRes) || !this.isJson(stopsRes)) {
+         throw new Error(`Static files missing or invalid format. Manifest: ${manifestRes.status}, Stops: ${stopsRes.status}`);
+      }
+
+      const manifest = await manifestRes.json();
+      const stops = await stopsRes.json();
 
       const db = await this.getDB();
       const tx = db.transaction(['stops', 'routes'], 'readwrite');
@@ -98,7 +117,7 @@ class SLService {
       
       localStorage.setItem(STATIC_TS_KEY, Date.now().toString());
     } catch (e) {
-      console.error("Kunde inte ladda och spara statisk data:", e);
+      console.warn("Varning: Kunde inte ladda statisk data. Detta är normalt om du inte kört 'npm run process-gtfs' än.", e);
     }
   }
   
@@ -173,7 +192,7 @@ class SLService {
   async getLineRoute(routeId: string): Promise<SLLineRoute | null> {
     try {
         const response = await fetch(`/data/lines/${routeId}.json`);
-        if (!response.ok) throw new Error('Line data not found');
+        if (!response.ok || !this.isJson(response)) throw new Error('Line data not found');
         const lineData = await response.json();
         
         const stops: SLStop[] = lineData.stops.map((s: any) => ({
