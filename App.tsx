@@ -4,6 +4,7 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap 
 import L from 'leaflet';
 import SearchBar from './components/SearchBar';
 import VehiclePopup from './components/VehiclePopup';
+import VehicleSearch from './components/VehicleSearch';
 import { slService, LineManifestEntry } from './services/slService';
 import { SLVehicle, SLLineRoute, SearchResult, SLStop } from './types';
 import { RefreshCw, Map as MapIcon, AlertTriangle, MapPin, X } from 'lucide-react';
@@ -229,6 +230,34 @@ const App: React.FC = () => {
     }
   };
 
+  const handleVehicleFound = async (vehicle: SLVehicle, routeId: string) => {
+    setLoading(true);
+    setLiveStatus('loading');
+    
+    // 1. Ladda rutten som fordonet tillhör
+    const route = await slService.getLineRoute(routeId);
+    if (route && route.path.length > 0) {
+      setActiveRoute(route);
+      setActiveStop(null);
+      
+      // 2. Markera fordonet så att popupen öppnas
+      setSelectedVehicleId(vehicle.id);
+      
+      // 3. Zooma in på fordonet
+      setMapConfig({
+        center: [vehicle.lat, vehicle.lng],
+        zoom: 15,
+        bounds: undefined
+      });
+      
+      // Fordonet kommer att dyka upp "på riktigt" nästa gång live-loopen körs (inom max 5s),
+      // men vi sätter det redan nu för omedelbar feedback
+      setVehicles([vehicle]); 
+    }
+    
+    setLoading(false);
+  };
+
   const getStatusText = () => {
     if (!isApiConfigured) return "API ej konfigurerad";
     if (!activeRoute) return "Väntar på sökning...";
@@ -289,7 +318,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Status-rutan kvar nere i hörnet, utan linje-chippet */}
+      {/* Status-rutan kvar nere till vänster */}
       <div className="absolute bottom-6 left-6 z-[1000] flex flex-col gap-3 pointer-events-none">
         <div className="bg-slate-900/90 backdrop-blur-xl border border-white/10 p-4 rounded-2xl shadow-2xl flex items-center gap-4 min-w-[240px]">
           <div className={`w-3 h-3 rounded-full ${activeRoute ? (liveStatus === 'ok' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500') : 'bg-slate-600'}`}></div>
@@ -298,6 +327,11 @@ const App: React.FC = () => {
             <div className="text-sm font-semibold text-white">{getStatusText()}</div>
           </div>
         </div>
+      </div>
+
+      {/* NYTT: Sök vagn nere till höger */}
+      <div className="absolute bottom-6 right-6 z-[1000] pointer-events-auto">
+         <VehicleSearch onVehicleFound={handleVehicleFound} />
       </div>
 
       <MapContainer center={mapConfig.center} zoom={mapConfig.zoom} zoomControl={false} className="w-full h-full">

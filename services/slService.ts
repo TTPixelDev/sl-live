@@ -284,6 +284,76 @@ class SLService {
       });
   }
 
+  // Sök efter en specifik vagn globalt
+  async findVehicle(vehicleNumber: string): Promise<{vehicle: SLVehicle, routeId: string} | null> {
+      try {
+        if (!this.isInitialized) await this.initialize();
+      } catch (initErr) {
+        console.error("Initialization failed in findVehicle:", initErr);
+        return null; 
+      }
+      
+      try {
+          const posRes = await fetch(RT_VEHICLE_URL);
+          if (!posRes.ok) throw new Error(`API Error: ${posRes.status}`);
+          const posBuffer = await posRes.arrayBuffer();
+          
+          const root = await this.getRTRoot();
+          const FeedMessage = root.lookupType("transit_realtime.FeedMessage");
+          const posMessage = FeedMessage.decode(new Uint8Array(posBuffer));
+          const posObject = FeedMessage.toObject(posMessage, { enums: String, longs: String });
+          const posEntities = posObject.entity || [];
+          
+          const target = vehicleNumber.trim();
+
+          for (const e of posEntities) {
+              const v = e.vehicle;
+              // SL-specifik logik: 
+              // 1. Kolla om 'label' matchar exakt.
+              // 2. Kolla om 'id' SLUTAR på söknumret (då ID ofta är '903100100010XXXX' där XXXX är vagnsnumret).
+              if (v && v.vehicle) {
+                  const label = v.vehicle.label ? String(v.vehicle.label).trim() : '';
+                  const vid = v.vehicle.id ? String(v.vehicle.id).trim() : '';
+                  
+                  // Vi matchar om etiketten är exakt ELLER om ID slutar med söksträngen
+                  // Detta hanterar både "4523" (input) -> "4523" (label) och "4523" (input) -> "...104523" (id)
+                  if (label === target || (vid && vid.endsWith(target))) {
+                       const tripId = v.trip?.tripId || v.trip?.trip_id;
+                       let routeId = v.trip?.routeId || v.trip?.route_id;
+
+                       // Försök hitta routeId via trip map om det saknas och kartan är laddad
+                       if (tripId && this.tripToRouteMap && this.tripToRouteMap[tripId]) {
+                           routeId = this.tripToRouteMap[tripId].r;
+                       }
+
+                       if (routeId) {
+                           return {
+                               vehicle: {
+                                   id: v.vehicle.id || e.id,
+                                   line: routeId,
+                                   tripId: tripId || "",
+                                   operator: "SL",
+                                   vehicleNumber: v.vehicle.label || vid.slice(-4), // Fallback för visning
+                                   lat: v.position.latitude,
+                                   lng: v.position.longitude,
+                                   bearing: v.position.bearing || 0,
+                                   speed: (v.position.speed || 0) * 3.6,
+                                   destination: "", 
+                                   type: "Buss"
+                               },
+                               routeId: routeId
+                           };
+                       }
+                  }
+              }
+          }
+          return null;
+      } catch (e) {
+          console.error("Fel vid fordonssökning (detaljer):", e);
+          return null;
+      }
+  }
+
   async getLiveVehicles(route?: SLLineRoute | null): Promise<SLVehicle[]> {
     if (!route) return [];
     // Säkerställ att vi har data om det anropas innan init
