@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import SearchBar from './components/SearchBar';
 import VehiclePopup from './components/VehiclePopup';
@@ -52,14 +52,16 @@ interface VehicleMarkerProps {
   lineShortName: string;
   isSelected: boolean;
   onSelect: (id: string) => void;
+  onDeselect: () => void;
 }
 
 // Komponent för fordon som ser till att popupen stannar öppen om fordonet är valt
-const VehicleMarker: React.FC<VehicleMarkerProps> = ({ vehicle, lineShortName, isSelected, onSelect }) => {
+const VehicleMarker: React.FC<VehicleMarkerProps> = ({ vehicle, lineShortName, isSelected, onSelect, onDeselect }) => {
   const markerRef = useRef<L.Marker>(null);
   const icon = useMemo(() => createVehicleIcon(vehicle.bearing, lineShortName), [vehicle.bearing, lineShortName]);
 
   useEffect(() => {
+    // Om fordonet är valt, se till att popupen är öppen även när positionen uppdateras
     if (isSelected && markerRef.current) {
       if (!markerRef.current.isPopupOpen()) {
         markerRef.current.openPopup();
@@ -74,6 +76,13 @@ const VehicleMarker: React.FC<VehicleMarkerProps> = ({ vehicle, lineShortName, i
       icon={icon}
       eventHandlers={{
         click: () => onSelect(vehicle.id),
+        popupclose: () => {
+          // Om popupen stängs (t.ex. av användaren), avmarkera fordonet
+          // så att det inte tvingas öppet igen vid nästa positionsuppdatering.
+          if (isSelected) {
+            onDeselect();
+          }
+        }
       }}
     >
       <Popup className="custom-popup">
@@ -114,6 +123,23 @@ const MapController = ({ center, zoom, bounds }: { center: [number, number]; zoo
   return null;
 };
 
+// Hjälpkomponent för att lyssna på kartrörelser och uppdatera bounds
+const MapBoundsReporter = ({ onBoundsChange }: { onBoundsChange: (bounds: L.LatLngBounds) => void }) => {
+  const map = useMap();
+  
+  // Sätt bounds vid start
+  useEffect(() => {
+    onBoundsChange(map.getBounds());
+  }, []);
+
+  useMapEvents({
+    moveend: () => onBoundsChange(map.getBounds()),
+    zoomend: () => onBoundsChange(map.getBounds())
+  });
+
+  return null;
+};
+
 const ApiKeyWarning = () => (
   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[2000] w-full max-w-2xl px-4 pointer-events-none">
     <div className="bg-red-600/90 backdrop-blur-md text-white p-4 rounded-xl shadow-lg flex items-start gap-3 border border-red-400">
@@ -140,6 +166,12 @@ const App: React.FC = () => {
   const [routeManifest, setRouteManifest] = useState<Map<string, LineManifestEntry>>(new Map());
   const [liveStatus, setLiveStatus] = useState<'loading' | 'ok' | 'error'>('loading');
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Toggle state: default false för att spara prestanda
+  const [showAllVehicles, setShowAllVehicles] = useState(false);
+  
+  // Ny state för att hålla reda på vad som syns på kartan
+  const [visibleBounds, setVisibleBounds] = useState<L.LatLngBounds | null>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -155,14 +187,26 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (loading || !isApiConfigured || !activeRoute) {
+    if (loading || !isApiConfigured) {
       setVehicles([]);
       return;
     }
 
     const fetchLive = async () => {
       try {
-        const data = await slService.getLiveVehicles(activeRoute);
+        // Logik: Om ingen rutt är vald OCH toggle är av -> hämta inget.
+        if (!activeRoute && !showAllVehicles) {
+            setVehicles([]);
+            setLiveStatus('ok'); // Vi sätter OK men visar inget
+            return;
+        }
+
+        // Om showAllVehicles är PÅ, skicka null till tjänsten för att hämta allt, 
+        // oavsett om vi har en aktiv rutt eller ej. 
+        // Om showAllVehicles är AV, skicka activeRoute (som filtrerar server-side/service-side).
+        const routeToFetch = showAllVehicles ? null : activeRoute;
+        const data = await slService.getLiveVehicles(routeToFetch);
+        
         setVehicles(data);
         if (liveStatus !== 'ok') setLiveStatus('ok');
       } catch(e) {
@@ -173,16 +217,15 @@ const App: React.FC = () => {
     fetchLive();
     const interval = setInterval(fetchLive, 5000);
     return () => clearInterval(interval);
-  }, [loading, activeRoute, isApiConfigured]);
+  }, [loading, activeRoute, isApiConfigured, showAllVehicles]);
 
   const handleClear = () => {
     setActiveRoute(null);
     setActiveStop(null);
-    setVehicles([]);
     setSelectedVehicleId(null);
     setLiveStatus('loading');
     setMapConfig(DEFAULT_VIEW);
-    setSearchQuery(''); // Rensa sökfältet
+    setSearchQuery(''); 
   };
 
   const handleSearchSelect = async (result: SearchResult) => {
@@ -260,10 +303,25 @@ const App: React.FC = () => {
 
   const getStatusText = () => {
     if (!isApiConfigured) return "API ej konfigurerad";
-    if (!activeRoute) return "Väntar på sökning...";
+    
     if (liveStatus === 'loading') return "Söker fordon...";
     if (liveStatus === 'error') return "Anslutningsfel";
-    return `${vehicles.length} fordon kör just nu på linje ${activeRoute.line}`;
+
+    if (activeRoute && !showAllVehicles) {
+       // Räkna endast fordon för den aktiva linjen om vi inte visar alla
+       const routeVehicles = vehicles.filter(v => v.line === activeRoute.id);
+       return `${routeVehicles.length} fordon på linje ${activeRoute.line}`;
+    }
+    
+    if (activeRoute && showAllVehicles) {
+        return `Linje ${activeRoute.line} + Övrig trafik`;
+    }
+
+    if (showAllVehicles) {
+        return `${vehicles.length} fordon i trafik (Global)`;
+    }
+    
+    return "Väntar på sökning...";
   };
 
   const getLineDisplayName = () => {
@@ -274,6 +332,27 @@ const App: React.FC = () => {
     }
     return `Linje ${activeRoute.line}`;
   };
+
+  // Filtreringslogik: Visa endast fordon inom viewport x 9 (1 skärmbuffert runt om)
+  // Detta förhindrar att 2000+ DOM-noder skapas om man är inzoomad
+  const visibleVehicles = useMemo(() => {
+    // Om vi har en aktiv rutt OCH vi INTE valt att visa alla bussar:
+    // Visa endast de som tillhör rutten. Ingen viewport-begränsning behövs då det är få bussar.
+    if (activeRoute && !showAllVehicles) {
+        return vehicles.filter(v => v.line === activeRoute.id || activeRoute.trip_ids.includes(v.tripId));
+    }
+
+    // Om vi visar ALLA bussar (oavsett om rutt är vald eller ej), måste vi filtrera på viewport
+    // för att inte krascha kartan.
+    if (!visibleBounds) return [];
+
+    // Pad(1) ökar bounds med 100% på höjd och bredd. 
+    // Det ger en 3x3 grid där mitten är viewporten.
+    const paddedBounds = visibleBounds.pad(1);
+
+    return vehicles.filter(v => paddedBounds.contains({ lat: v.lat, lng: v.lng }));
+  }, [vehicles, visibleBounds, activeRoute, showAllVehicles]);
+
 
   if (loading) {
     return (
@@ -318,13 +397,31 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Status-rutan kvar nere till vänster */}
-      <div className="absolute bottom-6 left-6 z-[1000] flex flex-col gap-3 pointer-events-none">
-        <div className="bg-slate-900/90 backdrop-blur-xl border border-white/10 p-4 rounded-2xl shadow-2xl flex items-center gap-4 min-w-[240px]">
-          <div className={`w-3 h-3 rounded-full ${activeRoute ? (liveStatus === 'ok' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500') : 'bg-slate-600'}`}></div>
-          <div>
-            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">Live Status</div>
-            <div className="text-sm font-semibold text-white">{getStatusText()}</div>
+      {/* Status-rutan kvar nere till vänster, uppdaterad med Toggle */}
+      <div className="absolute bottom-6 left-6 z-[1000] flex flex-col gap-3 pointer-events-auto">
+        <div className="bg-slate-900/90 backdrop-blur-xl border border-white/10 p-4 rounded-2xl shadow-2xl flex flex-col gap-3 min-w-[240px]">
+          {/* Status Header */}
+          <div className="flex items-center gap-4">
+             <div className={`w-3 h-3 rounded-full flex-shrink-0 ${liveStatus === 'ok' && (activeRoute || showAllVehicles) ? 'bg-emerald-500 animate-pulse' : (liveStatus === 'error' ? 'bg-red-500' : 'bg-yellow-500')}`}></div>
+             <div>
+               <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">Live Status</div>
+               <div className="text-sm font-semibold text-white">{getStatusText()}</div>
+             </div>
+          </div>
+          
+          {/* Separator och Toggle (Nu alltid synlig) */}
+          <div className="h-px w-full bg-white/10"></div>
+          <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-300">Visa alla bussar</span>
+              <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                      type="checkbox" 
+                      checked={showAllVehicles} 
+                      onChange={(e) => setShowAllVehicles(e.target.checked)} 
+                      className="sr-only peer" 
+                  />
+                  <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
           </div>
         </div>
       </div>
@@ -337,6 +434,9 @@ const App: React.FC = () => {
       <MapContainer center={mapConfig.center} zoom={mapConfig.zoom} zoomControl={false} className="w-full h-full">
         <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
         <MapController center={mapConfig.center} zoom={mapConfig.zoom} bounds={mapConfig.bounds} />
+        
+        {/* Rapportera bounds för optimering */}
+        <MapBoundsReporter onBoundsChange={setVisibleBounds} />
 
         {activeRoute && (
           <>
@@ -369,6 +469,7 @@ const App: React.FC = () => {
              eventHandlers={{
                popupclose: () => {
                  setActiveStop(null);
+                 setSearchQuery(''); 
                },
              }}
            >
@@ -387,7 +488,7 @@ const App: React.FC = () => {
            </AutoOpenMarker>
         )}
 
-        {vehicles.map((v) => {
+        {visibleVehicles.map((v) => {
           const lineInfo = routeManifest.get(v.line);
           const shortName = lineInfo ? lineInfo.line : '?';
           return (
@@ -400,6 +501,7 @@ const App: React.FC = () => {
                 setSelectedVehicleId(id);
                 setActiveStop(null);
               }}
+              onDeselect={() => setSelectedVehicleId(null)}
             />
           );
         })}

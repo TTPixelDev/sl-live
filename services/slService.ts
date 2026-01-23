@@ -355,7 +355,8 @@ class SLService {
   }
 
   async getLiveVehicles(route?: SLLineRoute | null): Promise<SLVehicle[]> {
-    if (!route) return [];
+    // VIKTIGT: Vi tar bort spärren "if (!route) return []" för att tillåta global visning.
+    
     // Säkerställ att vi har data om det anropas innan init
     if (!this.isInitialized) await this.initialize();
 
@@ -480,6 +481,12 @@ class SLService {
             });
         }
 
+        // Om ingen specifik rutt är vald, returnera ALLA fordon
+        if (!route) {
+            return allVehicles;
+        }
+
+        // Annars filtrera baserat på vald rutt
         const tripIdSet = new Set(route.trip_ids);
         let filteredVehicles = allVehicles.filter(v => tripIdSet.has(v.tripId));
         
