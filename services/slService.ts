@@ -38,6 +38,42 @@ interface TripUpdateInfo {
     lastStopId?: string;
 }
 
+// Helper för att beräkna avstånd i meter
+function getDistanceFromLatLonInM(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371e3; // Radius of the earth in km
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c; 
+}
+
+function deg2rad(deg: number) {
+  return deg * (Math.PI / 180);
+}
+
+// Helper för att formatera sekunder till läsbar tid
+function formatDuration(seconds: number) {
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    const min = Math.floor(seconds / 60);
+    const sec = Math.round(seconds % 60);
+    return sec > 0 ? `${min}m ${sec}s` : `${min}m`;
+}
+
+function getDelayText(delay?: number) {
+    if (delay === undefined || delay === null) return "";
+    const absDelay = Math.abs(delay);
+    const min = Math.round(absDelay / 60);
+    
+    // Tolerans på 60 sekunder räknas som i tid
+    if (absDelay < 60) return " • I tid";
+    if (delay > 0) return ` • ${min} min sen`;
+    return ` • ${min} min tidig`;
+}
+
 class SLService {
   private db: IDBDatabase | null = null;
   private isInitialized = false;
@@ -169,7 +205,7 @@ class SLService {
     }
   }
   
-  async search(query: string, activeRoute?: SLLineRoute | null): Promise<SearchResult[]> {
+  async search(query: string, activeRoute?: SLLineRoute | null, vehicleHistory?: HistoryPoint[]): Promise<SearchResult[]> {
     await this.initialize();
     if (query.trim().length < 1) return [];
 
@@ -179,12 +215,43 @@ class SLService {
     if (activeRoute && activeRoute.stops) {
         const stopResults = activeRoute.stops
             .filter(stop => stop.name.toLowerCase().includes(q))
-            .map(stop => ({
-                type: 'stop' as const,
-                id: stop.id,
-                title: stop.name,
-                subtitle: `På linje ${activeRoute.line}`
-            }));
+            .map(stop => {
+                let infoSubtitle = "";
+                
+                // Om vi har historik, analysera passagen
+                if (vehicleHistory && vehicleHistory.length > 0) {
+                    // Hitta alla punkter inom en viss radie (50m)
+                    const pointsInZone = vehicleHistory.filter(point => 
+                        getDistanceFromLatLonInM(stop.lat, stop.lng, point.lat, point.lng) < 50
+                    ).sort((a, b) => a.ts - b.ts);
+
+                    if (pointsInZone.length > 0) {
+                        const arrivalPoint = pointsInZone[0];
+                        const departurePoint = pointsInZone[pointsInZone.length - 1];
+                        
+                        const arrivalTime = new Date(arrivalPoint.ts).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+                        const dwellTimeMs = departurePoint.ts - arrivalPoint.ts;
+                        const dwellTimeSec = dwellTimeMs / 1000;
+                        
+                        // Hämta försening från punkten (om den sparats)
+                        const delayText = getDelayText(arrivalPoint.delay);
+
+                        // Om bussen stannade mer än 20 sekunder räknar vi det som ett stopp
+                        if (dwellTimeSec > 20) {
+                            infoSubtitle = ` • Stannade ${formatDuration(dwellTimeSec)} (${arrivalTime})${delayText}`;
+                        } else {
+                            infoSubtitle = ` • Passerade ${arrivalTime}${delayText}`;
+                        }
+                    }
+                }
+
+                return {
+                    type: 'stop' as const,
+                    id: stop.id,
+                    title: stop.name,
+                    subtitle: `På linje ${activeRoute.line}${infoSubtitle}`
+                };
+            });
         
         const lineResults = await this.searchLines(q, db);
         return [...lineResults, ...stopResults].slice(0, 15);

@@ -9,6 +9,7 @@ const uri = process.env.MONGODB_URI;
 
 // Filtrera bort DEP0169 (url.parse deprecation) varningar som kan uppstå 
 // i vissa Node-miljöer trots att moderna drivrutiner används.
+// @ts-ignore
 const originalEmit = process.emit;
 // @ts-ignore
 process.emit = (name, data, ...args) => {

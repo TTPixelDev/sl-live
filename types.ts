@@ -41,4 +41,5 @@ export interface HistoryPoint {
   lat: number;
   lng: number;
   ts: number;
+  delay?: number;
 }

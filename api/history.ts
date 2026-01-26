@@ -23,13 +23,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ path: [] });
     }
 
-    // Returnera objekt med lat, lng och ts istället för bara array
+    // Returnera objekt med lat, lng, ts och delay
     const path = (trip.trail as any[])
         .sort((a, b) => a.ts - b.ts)
         .map(p => ({
             lat: p.lat, 
             lng: p.lng, 
-            ts: p.ts
+            ts: p.ts,
+            delay: p.delay // Skicka med delay om det finns
         }));
 
     return res.status(200).json({ path });

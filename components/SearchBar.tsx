@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, Bus, MapPin, X } from 'lucide-react';
 import { slService } from '../services/slService';
-import { SearchResult, SLLineRoute } from '../types';
+import { SearchResult, SLLineRoute, HistoryPoint } from '../types';
 
 interface SearchBarProps {
   onSelect: (result: SearchResult) => void;
@@ -11,6 +11,7 @@ interface SearchBarProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
   placeholder?: string;
+  historyPath?: HistoryPoint[];
 }
 
 const SearchBar: React.FC<SearchBarProps> = ({ 
@@ -19,7 +20,8 @@ const SearchBar: React.FC<SearchBarProps> = ({
   activeRoute, 
   searchQuery, 
   onSearchChange,
-  placeholder = "Sök linje eller hållplats..." 
+  placeholder = "Sök linje eller hållplats...",
+  historyPath
 }) => {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -32,7 +34,8 @@ const SearchBar: React.FC<SearchBarProps> = ({
   useEffect(() => {
     const fetchResults = async () => {
       if (searchQuery.trim().length > 0) {
-        const res = await slService.search(searchQuery, activeRoute);
+        // Skicka med historyPath för att kunna visa passerade tider
+        const res = await slService.search(searchQuery, activeRoute, historyPath);
         setResults(res);
         
         // Öppna bara dropdown om vi inte precis har valt något
@@ -48,7 +51,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
       }
     };
     fetchResults();
-  }, [searchQuery, activeRoute]);
+  }, [searchQuery, activeRoute, historyPath]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

@@ -45,6 +45,29 @@ async function fetchAndSaveData(apiKey: string, db: any) {
         return { saved: 0, message: "0 entities returned" };
     }
 
+    // 1. Skapa en map med förseningar från TripUpdates (finns ofta i samma feed eller relaterade)
+    // Eftersom detta API främst är VehiclePositions kanske TripUpdates är glesa, men vi försöker hitta dem.
+    // Om API:et enbart returnerar VehiclePositions här måste vi förlita oss på att TripUpdates hämtas separat,
+    // men för enkelhetens skull i cron-jobbet kollar vi om entiteterna innehåller trip_updates.
+    const tripDelays: Record<string, number> = {};
+    
+    entities.forEach((e: any) => {
+        if (e.tripUpdate && e.tripUpdate.trip && e.tripUpdate.trip.tripId) {
+            const updates = e.tripUpdate.stopTimeUpdate;
+            if (updates && updates.length > 0) {
+                // Ta första bästa försening
+                const first = updates[0];
+                let delay = undefined;
+                if (first.arrival?.delay !== undefined) delay = parseInt(first.arrival.delay);
+                else if (first.departure?.delay !== undefined) delay = parseInt(first.departure.delay);
+                
+                if (delay !== undefined) {
+                    tripDelays[e.tripUpdate.trip.tripId] = delay;
+                }
+            }
+        }
+    });
+
     const now = Date.now();
     const expireTime = new Date(now + 2 * 60 * 60 * 1000); 
 
@@ -57,13 +80,19 @@ async function fetchAndSaveData(apiKey: string, db: any) {
 
             if (!tripId) return null;
 
+            // Försök hitta försening om vi lyckades mappa den, annars undefined
+            // Notera: i GTFS-RT VehiclePositions feeds skickas sällan TripUpdates i samma meddelande.
+            // Men om det finns, använder vi det.
+            const delay = tripDelays[tripId];
+
             return {
                 tripId: tripId,
                 line: routeId, 
                 vehicleId: e.vehicle.vehicle?.id || e.id,
                 lat: e.vehicle.position?.latitude,
                 lng: e.vehicle.position?.longitude,
-                ts: now
+                ts: now,
+                delay: delay
             };
         })
         .filter((v: any) => v !== null && v.lat !== undefined && v.lng !== undefined);
@@ -92,7 +121,8 @@ async function fetchAndSaveData(apiKey: string, db: any) {
               trail: {
                 lat: v.lat,
                 lng: v.lng,
-                ts: now
+                ts: now,
+                delay: v.delay // Spara undan förseningen om den finns
               }
             }
           },
@@ -154,7 +184,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const workDuration = Date.now() - loopStart;
         
         // Calculate needed sleep to maintain target interval
-        // If work took 1s, sleep 4s (if interval is 5s)
         const sleepTime = Math.max(0, INTERVAL_MS - workDuration);
 
         // Check if sleeping would push us over the total limit

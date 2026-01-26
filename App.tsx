@@ -359,6 +359,7 @@ const App: React.FC = () => {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         placeholder={activeRoute ? "Sök hållplats på linjen..." : "Sök linje eller hållplats..."}
+        historyPath={historyPath}
       />
 
       {activeRoute && (
