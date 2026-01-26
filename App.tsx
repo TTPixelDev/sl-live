@@ -85,7 +85,7 @@ const VehicleMarker: React.FC<VehicleMarkerProps> = ({ vehicle, lineShortName, i
         }
       }}
     >
-      <Popup className="custom-popup">
+      <Popup className="custom-popup" autoPan={false}>
         <VehiclePopup vehicle={vehicle} lineShortName={lineShortName} />
       </Popup>
     </Marker>
