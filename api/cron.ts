@@ -156,7 +156,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Configuration for Pro Plan
   const TOTAL_RUN_TIME_MS = 58000; // Stop just before the next minute starts (58s)
-  const INTERVAL_MS = 5000; // Target interval: 5 seconds (Updated from 10s)
+  const INTERVAL_MS = 10000; // Target interval: 10 seconds
   const startTime = Date.now();
 
   try {

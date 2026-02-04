@@ -9,7 +9,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "process-gtfs": "node scripts/process-gtfs.mjs"
+    "update": "node scripts/process-gtfs.mjs",
+    "download": "node scripts/download-gtfs.mjs"
   },
   "dependencies": {
     "@vercel/analytics": "^1.6.1",
