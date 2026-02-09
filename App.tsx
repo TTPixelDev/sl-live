@@ -179,7 +179,8 @@ const App: React.FC = () => {
 
             if (strictPoints.length >= 2) {
                 const durationSec = Math.round((strictPoints[strictPoints.length - 1].ts - strictPoints[0].ts) / 1000);
-                if (durationSec >= 4) {
+                // Ändrad tröskel: mer än 10 sekunder krävs för att det ska räknas som stopp
+                if (durationSec > 10) {
                     isActuallyStopped = true;
                     const mins = Math.floor(durationSec / 60);
                     const secs = durationSec % 60;
