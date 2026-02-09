@@ -1,12 +1,14 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import SearchBar from './components/SearchBar';
 import VehiclePopup from './components/VehiclePopup';
 import VehicleSearch from './components/VehicleSearch';
-import { slService, LineManifestEntry } from './services/slService';
+import LineAlerts from './components/LineAlerts';
+import { slService, LineManifestEntry, SLServiceAlert } from './services/slService';
 import { SLVehicle, SLLineRoute, SearchResult, SLStop, HistoryPoint } from './types';
-import { RefreshCw, Ship, Clock, Timer } from 'lucide-react';
+import { RefreshCw, Ship, Clock, Timer, AlertTriangle } from 'lucide-react';
 
 // Fix för Leaflet ikoner
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -22,7 +24,6 @@ const DEFAULT_VIEW: { center: [number, number]; zoom: number; bounds?: L.LatLngB
   bounds: undefined
 };
 
-// Linjer som oftast saknar bearing data eller har fast riktning och därför visas som cirklar
 const NO_BEARING_LINES = ['7', '12', '21', '25', '26', '27', '28', '29', '30', '31'];
 
 const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -124,6 +125,7 @@ const App: React.FC = () => {
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [activeRoute, setActiveRoute] = useState<SLLineRoute | null>(null);
   const [activeStop, setActiveStop] = useState<SLStop | null>(null);
+  const [alerts, setAlerts] = useState<SLServiceAlert[]>([]);
   const [mapConfig, setMapConfig] = useState(DEFAULT_VIEW);
   const [routeManifest, setRouteManifest] = useState<Map<string, LineManifestEntry>>(new Map());
   const [searchQuery, setSearchQuery] = useState('');
@@ -141,9 +143,16 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (loading) return;
-    const fetch = async () => setVehicles(await slService.getLiveVehicles(agency));
-    fetch();
-    const i = setInterval(fetch, 5000);
+    const fetchData = async () => {
+      const [v, a] = await Promise.all([
+        slService.getLiveVehicles(agency),
+        slService.getServiceAlerts()
+      ]);
+      setVehicles(v);
+      setAlerts(a);
+    };
+    fetchData();
+    const i = setInterval(fetchData, 10000);
     return () => clearInterval(i);
   }, [loading, agency]);
 
@@ -160,6 +169,11 @@ const App: React.FC = () => {
         setHistory([]);
     }
   }, [selectedVehicleId, vehicles]);
+
+  const activeLineAlerts = useMemo(() => {
+    if (!activeRoute) return [];
+    return alerts.filter(a => a.affectedRoutes.includes(activeRoute.id));
+  }, [activeRoute, alerts]);
 
   const stopPassages = useMemo(() => {
     if (!activeRoute || history.length === 0) return new Map();
@@ -179,7 +193,6 @@ const App: React.FC = () => {
 
             if (strictPoints.length >= 2) {
                 const durationSec = Math.round((strictPoints[strictPoints.length - 1].ts - strictPoints[0].ts) / 1000);
-                // Ändrad tröskel: mer än 10 sekunder krävs för att det ska räknas som stopp
                 if (durationSec > 10) {
                     isActuallyStopped = true;
                     const mins = Math.floor(durationSec / 60);
@@ -233,37 +246,52 @@ const App: React.FC = () => {
 
   return (
     <div className="relative w-full h-full">
-      <div className="absolute top-4 left-4 z-[2000] bg-slate-900/90 backdrop-blur p-1 rounded-xl shadow-2xl flex border border-white/10">
+      <div className="absolute top-4 left-4 z-[3000] bg-slate-900/95 backdrop-blur p-1 rounded-xl shadow-2xl flex border border-white/10">
         <button onClick={() => { setAgency('SL'); handleClear(); }} className={`px-4 py-2 rounded-lg text-xs font-bold transition ${agency === 'SL' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>SL</button>
         <button onClick={() => { setAgency('WAAB'); handleClear(); }} className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 ${agency === 'WAAB' ? 'bg-cyan-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}><Ship className="w-4 h-4" /> WÅAB</button>
       </div>
 
-      <SearchBar 
-        onSelect={handleSelect} 
-        onClear={handleClear} 
-        activeRoute={activeRoute} 
-        searchQuery={searchQuery} 
-        onSearchChange={setSearchQuery} 
-        currentAgency={agency} 
-        stopPassages={stopPassages}
-      />
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[3000] w-full max-w-md px-4 flex flex-col gap-3">
+        <SearchBar 
+          onSelect={handleSelect} 
+          onClear={handleClear} 
+          activeRoute={activeRoute} 
+          searchQuery={searchQuery} 
+          onSearchChange={setSearchQuery} 
+          currentAgency={agency} 
+          stopPassages={stopPassages}
+          allAlerts={alerts}
+        />
+      </div>
+
+      <div className="absolute top-4 right-4 z-[3000] w-full max-w-[340px] pointer-events-none">
+        <div className="pointer-events-auto">
+          {activeRoute && !searchQuery && (
+            <LineAlerts alerts={activeLineAlerts} />
+          )}
+        </div>
+      </div>
 
       <div className="absolute bottom-6 left-6 right-6 z-[1000] flex justify-between items-end pointer-events-none">
-        <div className="bg-slate-900/90 backdrop-blur p-4 rounded-2xl shadow-2xl border border-white/10 pointer-events-auto min-w-[220px]">
-            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-3 flex items-center gap-2">
-                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" /> Live Status
+        <div className="bg-slate-900/95 backdrop-blur p-5 rounded-2xl shadow-2xl border border-white/10 pointer-events-auto min-w-[260px]">
+            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-4 flex items-center justify-between border-b border-white/5 pb-2">
+                <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" /> Live Status
+                </div>
             </div>
-            <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                    <span className="text-xs text-slate-300">
+            
+            <div className="space-y-4">
+                <div className="flex items-center justify-between gap-4 px-1">
+                    <span className="text-xs text-slate-300 font-bold">
                         {activeRoute ? `Fordon på linje ${activeRoute.line}` : 'Fordon i trafik'}
                     </span>
-                    <span className="text-xs text-white font-bold bg-slate-800 px-2 py-0.5 rounded">
+                    <span className="text-xs text-white font-bold bg-slate-800 px-2.5 py-1 rounded border border-white/5">
                         {activeRoute ? vehicles.filter(v => v.line === activeRoute.id).length : vehicles.length}
                     </span>
                 </div>
-                <div className="flex items-center justify-between gap-8 pt-2 border-t border-white/5">
-                    <span className="text-xs text-slate-300">Visa all trafik</span>
+                
+                <div className="flex items-center justify-between gap-8 pt-3 border-t border-white/5 px-1">
+                    <span className="text-xs text-slate-300 font-bold">Visa all trafik</span>
                     <label className="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} className="sr-only peer" />
                         <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
@@ -271,6 +299,7 @@ const App: React.FC = () => {
                 </div>
             </div>
         </div>
+        
         <div className="pointer-events-auto">
             <VehicleSearch currentAgency={agency} onVehicleFound={(v) => {
               setSelectedVehicleId(null);
@@ -338,16 +367,18 @@ const App: React.FC = () => {
             />
         )}
         
-        {vehicles.filter(v => showAll || (activeRoute && v.line === activeRoute.id) || selectedVehicleId === v.id).map(v => (
-            <VehicleMarker 
-                key={v.id} 
-                vehicle={v} 
-                lineShortName={routeManifest.get(v.line)?.line || '?'} 
-                isSelected={selectedVehicleId === v.id} 
-                onSelect={setSelectedVehicleId} 
-                onDeselect={() => setSelectedVehicleId(null)} 
-            />
-        ))}
+        {vehicles.filter(v => showAll || (activeRoute && v.line === activeRoute.id) || selectedVehicleId === v.id).map(v => {
+            return (
+              <VehicleMarker 
+                  key={v.id} 
+                  vehicle={v} 
+                  lineShortName={routeManifest.get(v.line)?.line || '?'} 
+                  isSelected={selectedVehicleId === v.id} 
+                  onSelect={setSelectedVehicleId} 
+                  onDeselect={() => setSelectedVehicleId(null)} 
+              />
+            );
+        })}
       </MapContainer>
     </div>
   );
