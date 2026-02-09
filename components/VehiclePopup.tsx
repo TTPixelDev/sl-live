@@ -7,9 +7,68 @@ interface VehiclePopupProps {
   lineShortName: string;
 }
 
+const SHIP_NAMES: Record<string, string> = {
+  "0502": "Norrskär",
+  "0503": "Storskär",
+  "0504": "Västan",
+  "0513": "Waxholm I",
+  "0514": "Waxholm II",
+  "0519": "Skärgården",
+  "0520": "Roslagen",
+  "0522": "Vindöga",
+  "0523": "Solöga",
+  "0535": "Värmdö",
+  "0536": "Vånö",
+  "0537": "Väddö",
+  "0538": "Viberö",
+  "0539": "Vaxö",
+  "0540": "Saxaren",
+  "0545": "Söderarm",
+  "0546": "Sandhamn",
+  "0547": "Dalarö",
+  "0548": "Nämdö",
+  "0549": "Gällnö",
+  "0550": "Yxlan",
+  "0554": "Skraken",
+  "0555": "Viggen",
+  "0577": "Stångskär",
+  "0579": "Möja Buss",
+  "0651": "Delfin XI",
+  "0664": "Eskil",
+  "0671": "Sjögull",
+  "0672": "Sjöbris",
+  "0676": "Sunnan",
+  "0679": "Östan",
+  "0680": "Dux",
+  "0681": "Mysing",
+  "0683": "Utö Express",
+  "0691": "Silverö",
+  "0725": "Bamse",
+  "0736": "Skarpö",
+  "0737": "Madam",
+  "0739": "Gripen",
+  "0746": "Draken",
+  "0747": "Hamnskär",
+  "0751": "Silverpilen",
+  "0756": "Vindbådan",
+  "0757": "Öfararen",
+  "0773": "Askungen",
+  "0776": "Nordan",
+  "0777": "Romina",
+  "0780": "Lottina",
+  "0783": "Lusca",
+  "0795": "Svävare",
+  "0796": "Monsun",
+  "0797": "Hemfjord",
+  "0800": "Aurelia",
+  "0821": "Svävare 2",
+  "0994": "Utö Taxi"
+};
+
 const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) => {
   const match = /([0-9]{3})([0-9]{4})$/.exec(vehicle.id);
   const companyCode = match ? match[1] : null;
+  const vesselCode = match ? match[2] : vehicle.id.slice(-4);
   
   const getTransportType = (lineString: string) => {
     const lineName = lineString.replace('Linje ', '').trim();
@@ -75,7 +134,14 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
     default: company = companyCode ? `Entreprenör ${companyCode}` : "Okänd";
   }
 
-  const vehicleNumber = vehicle.vehicleNumber || vehicle.id.slice(-4);
+  const isBoat = vehicle.agency === 'WAAB' || transportInfo.type === 'Pendelbåt' || transportInfo.type === 'Färja';
+  
+  // Bestäm visningsnamn för fordonet (Vagnsnr eller Fartygsnamn)
+  let vehicleDisplayName = vehicle.vehicleNumber || vesselCode;
+  if (isBoat && SHIP_NAMES[vesselCode]) {
+    vehicleDisplayName = SHIP_NAMES[vesselCode];
+  }
+
   const roundedSpeed = Math.round(vehicle.speed);
   const hasDestination = vehicle.destination && vehicle.destination !== "Okänd";
   const isBus = transportInfo.type === 'Buss';
@@ -119,9 +185,9 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
             </div>
             <div className="space-y-1">
                 <div className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1">
-                    <Hash className="w-3 h-3" /> Vagnsnr
+                    <Hash className="w-3 h-3" /> {isBoat ? 'Fartyg' : 'Vagnsnr'}
                 </div>
-                <div className="text-xs font-bold text-slate-700">{vehicleNumber}</div>
+                <div className="text-xs font-bold text-slate-700 truncate">{vehicleDisplayName}</div>
             </div>
             {isBus && (
             <div className="space-y-1">
