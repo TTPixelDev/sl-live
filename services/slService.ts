@@ -25,11 +25,19 @@ interface TripMapEntry {
   h?: string; // headsign
 }
 
+// Map: RouteID -> DirectionID -> Headsign
+interface RouteDirectionMap {
+    [routeId: string]: {
+        [directionId: string]: string;
+    }
+}
+
 class SLService {
   private db: IDBDatabase | null = null;
   private isInitialized = false;
   private rtRoot: any = null;
   private tripToRouteMap: Record<string, TripMapEntry> | null = null;
+  private routeDirections: RouteDirectionMap | null = null;
   private stopsMap: Map<string, string> = new Map();
   private manifest: LineManifestEntry[] = [];
 
@@ -61,7 +69,7 @@ class SLService {
       await this.loadStopsFromDB();
       this.manifest = await this.getManifestFromDB();
     }
-    await this.loadAuxiliaryMaps();
+    await this.loadHelperMaps();
     this.isInitialized = true;
   }
 
@@ -70,11 +78,16 @@ class SLService {
     return this.manifest;
   }
 
-  private async loadAuxiliaryMaps() {
+  private async loadHelperMaps() {
     try {
         const tripRes = await fetch(`/data/trip-to-route.json?v=${Date.now()}`);
         if (tripRes.ok) this.tripToRouteMap = await tripRes.json();
-    } catch(e) { console.warn("Hjälpkartor saknas."); }
+        
+        const dirRes = await fetch(`/data/route-directions.json?v=${Date.now()}`);
+        if (dirRes.ok) {
+            this.routeDirections = await dirRes.json();
+        }
+    } catch(e) { console.warn("Kunde inte ladda hjälpkartor:", e); }
   }
 
   private async loadStopsFromDB() {
@@ -179,16 +192,30 @@ class SLService {
         const updatesMessage = FeedMessage.decode(new Uint8Array(updatesBuffer));
         const updatesObject = FeedMessage.toObject(updatesMessage, { enums: String, longs: String });
 
-        // Mappa tripId -> delay
-        const delays: Record<string, number> = {};
+        // Mappa tripId -> delay, directionId, routeId och lastStopId
+        const tripInfoMap: Map<string, { delay?: number, directionId?: number, routeId?: string, lastStopId?: string }> = new Map();
+        
         (updatesObject.entity || []).forEach((e: any) => {
             if (e.tripUpdate && e.tripUpdate.trip) {
-                const tId = e.tripUpdate.trip.tripId;
+                const tId = e.tripUpdate.trip.tripId || e.tripUpdate.trip.trip_id;
                 const stu = e.tripUpdate.stopTimeUpdate;
                 if (stu && stu.length > 0) {
                     const first = stu[0];
-                    if (first.arrival?.delay !== undefined) delays[tId] = first.arrival.delay;
-                    else if (first.departure?.delay !== undefined) delays[tId] = first.departure.delay;
+                    const delay = first.arrival?.delay !== undefined ? first.arrival.delay : 
+                                 first.departure?.delay !== undefined ? first.departure.delay : undefined;
+                    
+                    // Hämta lastStopId från sista uppdateringen
+                    const last = stu[stu.length - 1];
+                    const lastStopId = last?.stopId || last?.stop_id;
+                    
+                    // Hämta directionId och routeId från tripUpdate (gammal enkel logik)
+                    const directionId = e.tripUpdate.trip.directionId ?? e.tripUpdate.trip.direction_id;
+                    const routeId = e.tripUpdate.trip.routeId ?? e.tripUpdate.trip.route_id;
+                    
+                    // Om vi har tripId, spara all information
+                    if (tId) {
+                        tripInfoMap.set(tId, { delay, directionId, routeId, lastStopId });
+                    }
                 }
             }
         });
@@ -201,12 +228,64 @@ class SLService {
             const mapInfo = this.tripToRouteMap?.[tripId];
             if (!mapInfo) continue;
 
-            const routeId = mapInfo.r;
+            // Hämta info från tripInfoMap för att fylla i saknade värden (gammal enkel logik)
+            const info = tripInfoMap.get(tripId);
+
+            let routeId = mapInfo.r;
+            if (!routeId && info?.routeId) routeId = info.routeId;
+            let directionId = v.trip.directionId ?? v.trip.direction_id;
+            
+            // Fyll i från tripInfo om det saknas
+            if (info) {
+                if (directionId === undefined || directionId === null) directionId = info.directionId;
+                if (!routeId && info.routeId) routeId = info.routeId;
+            }
+
             const routeManifest = this.manifest.find(m => m.id === routeId);
             if (!routeManifest) continue;
 
             if (currentAgency && routeManifest.agency !== currentAgency) continue;
 
+            // Använd sofistikerad destination-logik från gamla versionen
+            let headsign = "Okänd";
+            let fallbackUsed = "none";
+            
+            // Försök med mapInfo.h först
+            if (mapInfo.h) {
+                headsign = mapInfo.h;
+                fallbackUsed = "mapInfo.h";
+            }
+            
+            // Fallback till routeDirections om det finns
+            if ((!headsign || headsign === "Okänd") && directionId !== undefined && directionId !== null && this.routeDirections) {
+                const dirStr = String(directionId);
+                const fallbackHeadsign = this.routeDirections[routeId]?.[dirStr];
+                if (fallbackHeadsign) {
+                    headsign = fallbackHeadsign;
+                    fallbackUsed = "routeDirections";
+                }
+            }
+            
+            // Tredje fallback: använd lastStopId för att få hållplatsnamn
+            if (!headsign || headsign === "Okänd") {
+                if (info?.lastStopId) {
+                    const stopName = this.stopsMap.get(info.lastStopId);
+                    if (stopName) {
+                        headsign = stopName;
+                        fallbackUsed = "lastStopId";
+                    }
+                }
+            }
+            
+            // Fjärde fallback: använd route manifest to/from som destination
+            if (!headsign || headsign === "Okänd") {
+                // Använd "to" fältet från route manifest som destination
+                if (routeManifest.to && routeManifest.to !== routeManifest.from) {
+                    headsign = routeManifest.to;
+                    fallbackUsed = "routeManifest.to";
+                }
+            }
+            
             vehicles.push({
                 id: v.vehicle?.id || entity.id,
                 line: routeId,
@@ -217,10 +296,10 @@ class SLService {
                 lng: v.position.longitude,
                 bearing: v.position.bearing || 0,
                 speed: (v.position.speed || 0) * 3.6,
-                destination: mapInfo.h || "Okänd",
+                destination: headsign,
                 type: routeManifest.agency === 'WAAB' ? 'Färja' : 'Buss',
                 agency: routeManifest.agency,
-                delay: delays[tripId]
+                delay: info?.delay
             });
         }
         return vehicles;
@@ -255,7 +334,7 @@ class SLService {
       message TripUpdate { optional TripDescriptor trip = 1; repeated StopTimeUpdate stop_time_update = 2; }
       message StopTimeUpdate { optional uint32 stop_sequence = 1; optional string stop_id = 4; optional StopTimeEvent arrival = 2; optional StopTimeEvent departure = 3; }
       message StopTimeEvent { optional int32 delay = 1; optional int64 time = 2; }
-      message TripDescriptor { optional string trip_id = 1; optional string route_id = 5; }
+      message TripDescriptor { optional string trip_id = 1; optional string route_id = 5; optional uint32 direction_id = 6; }
       message VehicleDescriptor { optional string id = 1; optional string label = 2; }
       message Position { required float latitude = 1; required float longitude = 2; optional float bearing = 3; optional float speed = 5; }
     `).root;

@@ -270,6 +270,7 @@ const App: React.FC = () => {
             // VIT (#ffffff) om fordonet ej varit där än (kommande hållplats)
             const markerFill = passage ? (passage.stopped ? "#10b981" : "#f59e0b") : "#ffffff";
             
+            
             return (
                 <CircleMarker 
                     key={s.id} 

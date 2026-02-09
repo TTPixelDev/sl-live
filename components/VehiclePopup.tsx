@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { SLVehicle } from '../types';
-import { Building2, Hash, Gauge, Activity } from 'lucide-react';
+import { Building2, Hash, Gauge, Activity, Bus, Train, Ship, TramFront, TrainFront as SubwayIcon } from 'lucide-react';
 
 interface VehiclePopupProps {
   vehicle: SLVehicle;
@@ -11,6 +11,22 @@ interface VehiclePopupProps {
 const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) => {
   const match = /([0-9]{3})([0-9]{4})$/.exec(vehicle.id);
   const companyCode = match ? match[1] : null;
+  
+  // Samma logik som SearchBar för trafikslag
+  const getTransportType = (lineString: string) => {
+    const lineName = lineString.replace('Linje ', '').trim();
+    if (/[a-zA-Z]/.test(lineName)) return { type: 'Buss', icon: Bus };
+    const num = parseInt(lineName);
+    if (isNaN(num)) return { type: 'Buss', icon: Bus };
+    if ([10, 11, 13, 14, 17, 18, 19].includes(num)) return { type: 'Tunnelbana', icon: SubwayIcon };
+    if ([7, 12, 30, 31, 21, 25, 26, 27, 28, 29].includes(num)) return { type: 'Spårvagn', icon: TramFront };
+    if ([40, 41, 42, 43, 44, 48].includes(num)) return { type: 'Pendeltåg', icon: Train };
+    if ([80, 82, 83, 84, 89].includes(num)) return { type: 'Pendelbåt', icon: Ship };
+    return { type: 'Buss', icon: Bus };
+  };
+  
+  const transportInfo = getTransportType(lineShortName);
+  const TransportIcon = transportInfo.icon;
   
   let company = "Okänd";
   switch (companyCode) {
@@ -30,6 +46,7 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
   const vehicleNumber = vehicle.vehicleNumber || vehicle.id.slice(-4);
   const roundedSpeed = Math.round(vehicle.speed);
   const hasDestination = vehicle.destination && vehicle.destination !== "Okänd";
+  const isBus = transportInfo.type === 'Buss';
 
   const getDelayInfo = () => {
     if (vehicle.delay === undefined) return { text: "Realtid", color: "text-slate-500" };
@@ -49,8 +66,9 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
                 {lineShortName}
             </div>
             <div className="flex flex-col min-w-0">
-                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">
-                    {vehicle.type === 'Färja' ? 'Fartyg' : 'Buss'}
+                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5 flex items-center gap-1">
+                    <TransportIcon className="w-3 h-3" />
+                    {vehicle.agency === 'WAAB' ? 'Fartyg' : transportInfo.type}
                 </div>
                 <div className="text-sm font-bold text-white truncate leading-tight">
                     {hasDestination ? `mot ${vehicle.destination}` : `Linje ${lineShortName}`}
@@ -60,7 +78,7 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
       </div>
 
       <div className="p-4 space-y-4">
-        <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+        <div className={`grid gap-x-6 gap-y-4 ${isBus ? 'grid-cols-2' : 'grid-cols-1'}`}>
             <div className="space-y-1">
                 <div className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1">
                     <Building2 className="w-3 h-3" /> Entreprenör
@@ -73,12 +91,14 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
                 </div>
                 <div className="text-xs font-bold text-slate-700">{vehicleNumber}</div>
             </div>
+            {isBus && (
             <div className="space-y-1">
                 <div className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1">
                     <Gauge className="w-3 h-3" /> Hastighet
                 </div>
                 <div className="text-xs font-bold text-slate-700">{roundedSpeed} km/h</div>
             </div>
+            )}
             <div className="space-y-1">
                 <div className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1">
                     <Activity className="w-3 h-3" /> Punktlighet

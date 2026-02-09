@@ -195,12 +195,69 @@ async function processGTFS() {
         
         // Realtidsmappning - hämta alla trips igen för att ha komplett realtidskoll
         console.log('Skapar realtidsmappning...');
+        const routeDirectionStats = {}; // För att räkna ut vanligaste destinationen per riktning
+        
+        // Hämta stoppnamn för att kunna använda sista stoppet som destination
+        const stopNames = new Map();
+        await streamCsvFromEntry(entries.get('stops.txt'), (row) => {
+            stopNames.set(row.stop_id, row.stop_name);
+        }, 'stops.txt');
+        
+        // Samla sista stoppet för varje trip
+        const lastStops = new Map();
+        await streamCsvFromEntry(entries.get('stop_times.txt'), (row) => {
+            lastStops.set(row.trip_id, row.stop_id);
+        }, 'stop_times.txt');
+        
         await streamCsvFromEntry(entries.get('trips.txt'), (row) => {
             if (validRouteIds.has(row.route_id)) {
-                tripToRouteIdJson[row.trip_id] = { r: row.route_id };
+                // Använd sista stoppet som destination om headsign är tomt
+                let destination = row.trip_headsign || '';
+                if (!destination && lastStops.has(row.trip_id)) {
+                    const lastStopId = lastStops.get(row.trip_id);
+                    destination = stopNames.get(lastStopId) || '';
+                }
+                
+                tripToRouteIdJson[row.trip_id] = { 
+                    r: row.route_id,
+                    h: destination
+                };
+                
+                // Samla statistik för route-directions.json (använd destination från sista stoppet)
+                const dir = row.direction_id; // '0' eller '1'
+                if (dir !== undefined && dir !== '' && destination) {
+                    if (!routeDirectionStats[row.route_id]) routeDirectionStats[row.route_id] = {};
+                    if (!routeDirectionStats[row.route_id][dir]) routeDirectionStats[row.route_id][dir] = {};
+                    
+                    const currentCount = routeDirectionStats[row.route_id][dir][destination] || 0;
+                    routeDirectionStats[row.route_id][dir][destination] = currentCount + 1;
+                }
             }
         }, 'trips.txt');
+        
+        // Skapa route-directions.json (Fallback-data)
+        const routeDirections = {};
+        for (const [rId, dirs] of Object.entries(routeDirectionStats)) {
+            routeDirections[rId] = {};
+            for (const [dId, counts] of Object.entries(dirs)) {
+                // Hitta headsign med högst antal förekomster för denna riktning
+                let bestHeadsign = '';
+                let maxCount = 0;
+                for (const [h, countVal] of Object.entries(counts)) {
+                    const c = Number(countVal);
+                    if (c > maxCount) {
+                        maxCount = c;
+                        bestHeadsign = h;
+                    }
+                }
+                if (bestHeadsign) {
+                    routeDirections[rId][dId] = bestHeadsign;
+                }
+            }
+        }
+        
         fs.writeFileSync(path.join(OUT_DIR, 'trip-to-route.json'), JSON.stringify(tripToRouteIdJson));
+        fs.writeFileSync(path.join(OUT_DIR, 'route-directions.json'), JSON.stringify(routeDirections));
 
         console.log(`✅ Bearbetning klar! ${manifest.length} linjer sparade.`);
     } finally {
