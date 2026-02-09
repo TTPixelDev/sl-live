@@ -132,11 +132,10 @@ const App: React.FC = () => {
         const v = vehicles.find(x => x.id === selectedVehicleId);
         if (v) {
             slService.getVehicleHistory(v.tripId).then(setHistory);
-            if (!activeRoute || activeRoute.id !== v.line) {
-                slService.getLineRoute(v.line).then(r => {
-                    if (r) setActiveRoute(r);
-                });
-            }
+            // SÄTST ALLTID activeRoute till fordonets rutt när ett fordon markeras
+            slService.getLineRoute(v.line).then(r => {
+                if (r) setActiveRoute(r);
+            });
         }
     } else {
         setHistory([]);
@@ -148,7 +147,7 @@ const App: React.FC = () => {
     const passages = new Map<string, { time: string, stopped: boolean, duration?: string }>();
     
     activeRoute.stops.forEach(stop => {
-        // Ökad sökradie till 100m för att pålitligt fånga upp hållplatser med 5s GPS-jitter
+        // Minskad sökradie till 100m för mer exakt matching
         const nearbyPoints = history.filter(p => getDistance(p.lat, p.lng, stop.lat, stop.lng) < 100);
         
         if (nearbyPoints.length > 0) {
@@ -162,8 +161,8 @@ const App: React.FC = () => {
             const arrivalTime = new Date(first.ts).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
             
             let durationStr = "";
-            // Krav: Stoppet måste ha varat i minst 10 sekunder (minst 2 loggade punkter i rad)
-            const isActuallyStopped = durationSec >= 10;
+            // Minskad krav till 5 sekunder för att räknas som stopp
+            const isActuallyStopped = durationSec >= 5;
 
             if (isActuallyStopped) {
                 const mins = Math.floor(durationSec / 60);
@@ -178,6 +177,7 @@ const App: React.FC = () => {
             });
         }
     });
+    
     return passages;
   }, [activeRoute, history]);
 
@@ -267,19 +267,21 @@ const App: React.FC = () => {
         
         {activeRoute && <Polyline positions={activeRoute.path} color={agency === 'WAAB' ? "#0891b2" : "#3b82f6"} weight={6} opacity={0.6} />}
         
-        {activeRoute?.stops.map(s => {
+        {activeRoute && stopPassages.size > 0 && activeRoute?.stops.map(s => {
+            // Använd samma data som hover - stopPassages från useMemo
             const passage = stopPassages.get(s.id);
-            // GRÖN (#10b981) om fordonet stannat
-            // GUL (#f59e0b) om fordonet passerat utan att stå still 10s
-            // VIT (#ffffff) om fordonet ej varit där än (kommande hållplats)
-            const markerFill = passage ? (passage.stopped ? "#10b981" : "#f59e0b") : "#ffffff";
             
+            // Använd samma logik som hover - om passage finns, använd den för färg
+            let markerFill = "#ffffff";
+            if (passage) {
+                markerFill = passage.stopped ? "#10b981" : "#f59e0b";
+            }
             
             return (
                 <CircleMarker 
                     key={s.id} 
                     center={[s.lat, s.lng]} 
-                    radius={passage ? 8 : 4.5} 
+                    radius={6} 
                     fillColor={markerFill}
                     fillOpacity={1} 
                     color={agency === 'WAAB' ? "#0891b2" : "#3b82f6"} 
