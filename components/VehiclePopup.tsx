@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { SLVehicle } from '../types';
 import { Building2, Hash, Gauge, Activity, Bus, Train, Ship, TramFront, TrainFront as SubwayIcon, Circle } from 'lucide-react';
@@ -12,7 +11,6 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
   const match = /([0-9]{3})([0-9]{4})$/.exec(vehicle.id);
   const companyCode = match ? match[1] : null;
   
-  // Samma logik som SearchBar för trafikslag
   const getTransportType = (lineString: string) => {
     const lineName = lineString.replace('Linje ', '').trim();
     if (/[a-zA-Z]/.test(lineName)) return { type: 'Buss', icon: Bus };
@@ -20,7 +18,6 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
     if (isNaN(num)) return { type: 'Buss', icon: Bus };
     if ([10, 11, 13, 14, 17, 18, 19].includes(num)) return { type: 'Tunnelbana', icon: SubwayIcon };
     if ([7, 12, 30, 31, 21, 25, 26, 27, 28, 29].includes(num)) {
-      // Specifika ban-namn för olika spårvagnslinjer
       if (num === 7) return { type: 'Spårväg City', icon: Circle };
       if (num === 12) return { type: 'Nockebybanan', icon: TramFront };
       if (num === 21) return { type: 'Lidingöbanan', icon: Circle };
@@ -34,66 +31,24 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
     return { type: 'Buss', icon: Bus };
   };
   
-  // Bestäm bakgrundsfärg baserat på linjenummer och trafikslag
   const getLineColor = (lineString: string, agency?: string) => {
     if (agency === 'WAAB') return 'bg-cyan-600 shadow-lg shadow-cyan-500/20';
-    
     const lineName = lineString.replace('Linje ', '').trim();
     const num = parseInt(lineName);
-    
-    // Blå busslinjer
     const blueBusLines = [1, 2, 3, 4, 5, 6, 172, 173, 176, 177, 178, 179, 471, 474, 670, 676, 677, 873, 875];
-    if (!isNaN(num) && blueBusLines.includes(num)) {
-      return 'bg-blue-600 shadow-lg shadow-blue-500/20';
-    }
-    
-    // Röda busslinjer (alla andra bussar)
-    if (!isNaN(num) && ![10, 11, 13, 14, 17, 18, 19, 7, 12, 30, 31, 21, 25, 26, 27, 28, 29, 40, 41, 42, 43, 44, 48, 80, 82, 83, 84, 89].includes(num)) {
-      return 'bg-red-600 shadow-lg shadow-red-500/20';
-    }
-    
-    // Tunnelbana - specifika SL-färger
-    if ([10, 11].includes(num)) {
-      return 'bg-blue-700 shadow-lg shadow-blue-600/20'; // #0091D2
-    }
-    if ([13, 14].includes(num)) {
-      return 'bg-red-600 shadow-lg shadow-red-500/20'; // #E31F26
-    }
-    if ([17, 18, 19].includes(num)) {
-      return 'bg-green-600 shadow-lg shadow-green-500/20'; // #00B259
-    }
-    
-    // Pendeltåg - rosa
-    if ([40, 41, 42, 43, 44, 48].includes(num)) {
-      return 'bg-pink-500 shadow-lg shadow-pink-400/20'; // #F067A6
-    }
-    
-    // Specifika spårvägsfärger
-    if (num === 7) {
-      return 'bg-gray-600 shadow-lg shadow-gray-500/20'; // #80857E
-    }
-    if (num === 12) {
-      return 'bg-slate-600 shadow-lg shadow-slate-500/20'; // #738BA4
-    }
-    if (num === 21) {
-      return 'bg-amber-700 shadow-lg shadow-amber-600/20'; // #B66732
-    }
-    if ([30, 31].includes(num)) {
-      return 'bg-orange-600 shadow-lg shadow-orange-500/20'; // #DD8221
-    }
-    if ([25, 26].includes(num)) {
-      return 'bg-teal-600 shadow-lg shadow-teal-500/20'; // #00AAAD
-    }
-    if ([27, 28, 29].includes(num)) {
-      return 'bg-purple-600 shadow-lg shadow-purple-500/20'; // #9C5CA2
-    }
-    
-    // Pendelbåt - cyan
-    if ([80, 82, 83, 84, 89].includes(num)) {
-      return 'bg-cyan-600 shadow-lg shadow-cyan-500/20';
-    }
-    
-    // Övriga - blå som default
+    if (!isNaN(num) && blueBusLines.includes(num)) return 'bg-blue-600 shadow-lg shadow-blue-500/20';
+    if (!isNaN(num) && ![10, 11, 13, 14, 17, 18, 19, 7, 12, 30, 31, 21, 25, 26, 27, 28, 29, 40, 41, 42, 43, 44, 48, 80, 82, 83, 84, 89].includes(num)) return 'bg-red-600 shadow-lg shadow-red-500/20';
+    if ([10, 11].includes(num)) return 'bg-blue-700 shadow-lg shadow-blue-600/20';
+    if ([13, 14].includes(num)) return 'bg-red-600 shadow-lg shadow-red-500/20';
+    if ([17, 18, 19].includes(num)) return 'bg-green-600 shadow-lg shadow-green-500/20';
+    if ([40, 41, 42, 43, 44, 48].includes(num)) return 'bg-pink-500 shadow-lg shadow-pink-400/20';
+    if (num === 7) return 'bg-gray-600 shadow-lg shadow-gray-500/20';
+    if (num === 12) return 'bg-slate-600 shadow-lg shadow-slate-500/20';
+    if (num === 21) return 'bg-amber-700 shadow-lg shadow-amber-600/20';
+    if ([30, 31].includes(num)) return 'bg-orange-600 shadow-lg shadow-orange-500/20';
+    if ([25, 26].includes(num)) return 'bg-teal-600 shadow-lg shadow-teal-500/20';
+    if ([27, 28, 29].includes(num)) return 'bg-purple-600 shadow-lg shadow-purple-500/20';
+    if ([80, 82, 83, 84, 89].includes(num)) return 'bg-cyan-600 shadow-lg shadow-cyan-500/20';
     return 'bg-blue-600 shadow-lg shadow-blue-500/20';
   };
   
@@ -144,7 +99,7 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
                     {vehicle.agency === 'WAAB' ? 'Fartyg' : transportInfo.type}
                 </div>
                 <div className="text-sm font-bold text-white truncate leading-tight">
-                    {hasDestination ? `mot ${vehicle.destination}` : `Linje ${lineShortName}`}
+                    {hasDestination ? `${lineShortName} mot ${vehicle.destination}` : `Linje ${lineShortName}`}
                 </div>
             </div>
         </div>

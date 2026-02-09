@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
@@ -132,7 +131,6 @@ const App: React.FC = () => {
         const v = vehicles.find(x => x.id === selectedVehicleId);
         if (v) {
             slService.getVehicleHistory(v.tripId).then(setHistory);
-            // SÄTST ALLTID activeRoute till fordonets rutt när ett fordon markeras
             slService.getLineRoute(v.line).then(r => {
                 if (r) setActiveRoute(r);
             });
@@ -147,27 +145,31 @@ const App: React.FC = () => {
     const passages = new Map<string, { time: string, stopped: boolean, duration?: string }>();
     
     activeRoute.stops.forEach(stop => {
-        // Minskad sökradie till 100m för mer exakt matching
-        const nearbyPoints = history.filter(p => getDistance(p.lat, p.lng, stop.lat, stop.lng) < 100);
+        // Vi letar efter punkter inom 100m för att vara säkra på att fånga passagen
+        const anyNearbyPoints = history.filter(p => getDistance(p.lat, p.lng, stop.lat, stop.lng) < 100);
         
-        if (nearbyPoints.length > 0) {
-            nearbyPoints.sort((a, b) => a.ts - b.ts);
-            const first = nearbyPoints[0];
-            const last = nearbyPoints[nearbyPoints.length - 1];
-            
-            const durationMs = last.ts - first.ts;
-            const durationSec = Math.round(durationMs / 1000);
-            
+        if (anyNearbyPoints.length > 0) {
+            anyNearbyPoints.sort((a, b) => a.ts - b.ts);
+            const first = anyNearbyPoints[0];
             const arrivalTime = new Date(first.ts).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
             
+            // Kolla om bussen faktiskt stannade (måste ha punkter inom 35m)
+            const strictPoints = anyNearbyPoints.filter(p => getDistance(p.lat, p.lng, stop.lat, stop.lng) < 35);
+            let isActuallyStopped = false;
             let durationStr = "";
-            // Minskad krav till 5 sekunder för att räknas som stopp
-            const isActuallyStopped = durationSec >= 5;
 
-            if (isActuallyStopped) {
-                const mins = Math.floor(durationSec / 60);
-                const secs = durationSec % 60;
-                durationStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+            if (strictPoints.length >= 2) {
+                const durationSec = Math.round((strictPoints[strictPoints.length - 1].ts - strictPoints[0].ts) / 1000);
+                // Ett stopp räknas om fordonet varit inom 35m i minst 4 sekunder (pga 5s intervall)
+                if (durationSec >= 4) {
+                    isActuallyStopped = true;
+                    const mins = Math.floor(durationSec / 60);
+                    const secs = durationSec % 60;
+                    durationStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+                }
+            } else if (strictPoints.length === 1) {
+                // Specialfall: Om vi bara har en punkt exakt vid hållplatsen räknar vi det som passage (Gult)
+                isActuallyStopped = false;
             }
 
             passages.set(stop.id, {
@@ -185,12 +187,12 @@ const App: React.FC = () => {
     setActiveRoute(null); 
     setActiveStop(null); 
     setSelectedVehicleId(null); 
+    setHistory([]);
     setMapConfig(DEFAULT_VIEW); 
     setSearchQuery(''); 
   };
 
   const handleSelect = async (res: SearchResult) => {
-    // STÄNG ALLA ÖPPNA POPUPS VID NY SÖKNING
     setSelectedVehicleId(null);
     setHistory([]);
     
@@ -216,8 +218,8 @@ const App: React.FC = () => {
   return (
     <div className="relative w-full h-full">
       <div className="absolute top-4 left-4 z-[2000] bg-slate-900/90 backdrop-blur p-1 rounded-xl shadow-2xl flex border border-white/10">
-        <button onClick={() => { setAgency('SL'); handleClear(); }} className={`px-4 py-2 rounded-lg text-xs font-bold transition ${agency === 'SL' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>SL</button>
-        <button onClick={() => { setAgency('WAAB'); handleClear(); }} className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 ${agency === 'WAAB' ? 'bg-cyan-600 text-white' : 'text-slate-400'}`}><Ship className="w-4 h-4" /> WÅAB</button>
+        <button onClick={() => { setAgency('SL'); handleClear(); }} className={`px-4 py-2 rounded-lg text-xs font-bold transition ${agency === 'SL' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>SL</button>
+        <button onClick={() => { setAgency('WAAB'); handleClear(); }} className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 ${agency === 'WAAB' ? 'bg-cyan-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}><Ship className="w-4 h-4" /> WÅAB</button>
       </div>
 
       <SearchBar 
@@ -267,11 +269,10 @@ const App: React.FC = () => {
         
         {activeRoute && <Polyline positions={activeRoute.path} color={agency === 'WAAB' ? "#0891b2" : "#3b82f6"} weight={6} opacity={0.6} />}
         
-        {activeRoute && stopPassages.size > 0 && activeRoute?.stops.map(s => {
-            // Använd samma data som hover - stopPassages från useMemo
+        {activeRoute && activeRoute.stops.map(s => {
             const passage = stopPassages.get(s.id);
             
-            // Använd samma logik som hover - om passage finns, använd den för färg
+            // Hållplatserna är ALLTID vita om ingen historik (passage) hittas för valt fordon
             let markerFill = "#ffffff";
             if (passage) {
                 markerFill = passage.stopped ? "#10b981" : "#f59e0b";
@@ -279,9 +280,9 @@ const App: React.FC = () => {
             
             return (
                 <CircleMarker 
-                    key={s.id} 
+                    key={`${s.id}-${markerFill}`} // VIKTIGT: Inkludera färgen i key för att tvinga Leaflet att uppdatera
                     center={[s.lat, s.lng]} 
-                    radius={6} 
+                    radius={passage ? 8 : 6} // Gör pricken större om den har färg
                     fillColor={markerFill}
                     fillOpacity={1} 
                     color={agency === 'WAAB' ? "#0891b2" : "#3b82f6"} 
@@ -300,13 +301,15 @@ const App: React.FC = () => {
                                     {passage.duration && (
                                         <div className="flex items-center gap-1.5 text-[9px] text-slate-500 font-bold pl-4">
                                             <Timer className="w-2.5 h-2.5" />
-                                            Stod stilla i {passage.duration}
+                                            Stopptid: {passage.duration}
                                         </div>
                                     )}
                                 </div>
                             ) : selectedVehicleId ? (
                                 <div className="mt-1 text-[9px] text-slate-400 font-bold italic">Kommande hållplats</div>
-                            ) : null}
+                            ) : (
+                                <div className="mt-1 text-[9px] text-slate-400 font-bold italic">Hållplats</div>
+                            )}
                         </div>
                     </Tooltip>
                 </CircleMarker>
