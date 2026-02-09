@@ -237,8 +237,12 @@ const App: React.FC = () => {
             </div>
             <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                    <span className="text-xs text-slate-300">Fordon i trafik</span>
-                    <span className="text-xs text-white font-bold bg-slate-800 px-2 py-0.5 rounded">{vehicles.length}</span>
+                    <span className="text-xs text-slate-300">
+                        {activeRoute ? `Fordon på linje ${activeRoute.line}` : 'Fordon i trafik'}
+                    </span>
+                    <span className="text-xs text-white font-bold bg-slate-800 px-2 py-0.5 rounded">
+                        {activeRoute ? vehicles.filter(v => v.line === activeRoute.id).length : vehicles.length}
+                    </span>
                 </div>
                 <div className="flex items-center justify-between gap-8 pt-2 border-t border-white/5">
                     <span className="text-xs text-slate-300">Visa all trafik</span>
