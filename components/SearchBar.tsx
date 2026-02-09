@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, Bus, MapPin, X, Train, Ship, TramFront, TrainFront, Clock, CheckCircle2, Map as MapIcon, XCircle, Timer } from 'lucide-react';
 import { slService } from '../services/slService';
@@ -16,16 +15,42 @@ interface SearchBarProps {
 }
 
 const getTransportIcon = (lineString: string, agency?: 'SL' | 'WAAB') => {
-  if (agency === 'WAAB') return <Ship className="w-5 h-5 text-blue-400" />;
+  if (agency === 'WAAB') return <Ship className="w-5 h-5 text-white" />;
   const lineName = lineString.replace('Linje ', '').trim();
-  if (/[a-zA-Z]/.test(lineName)) return <Bus className="w-5 h-5 text-blue-400" />;
+  if (/[a-zA-Z]/.test(lineName)) return <Bus className="w-5 h-5 text-white" />;
   const num = parseInt(lineName);
-  if (isNaN(num)) return <Bus className="w-5 h-5 text-blue-400" />;
-  if ([10, 11, 13, 14, 17, 18, 19].includes(num)) return <TrainFront className="w-5 h-5 text-blue-400" />;
-  if ([7, 12, 30, 31, 21, 25, 26, 27, 28, 29].includes(num)) return <TramFront className="w-5 h-5 text-blue-400" />;
-  if ([40, 41, 42, 43, 44, 48].includes(num)) return <Train className="w-5 h-5 text-blue-400" />;
-  if ([80, 82, 83, 84, 89].includes(num)) return <Ship className="w-5 h-5 text-blue-400" />;
-  return <Bus className="w-5 h-5 text-blue-400" />;
+  if (isNaN(num)) return <Bus className="w-5 h-5 text-white" />;
+  if ([10, 11, 13, 14, 17, 18, 19].includes(num)) return <TrainFront className="w-5 h-5 text-white" />;
+  if ([7, 12, 30, 31, 21, 25, 26, 27, 28, 29].includes(num)) return <TramFront className="w-5 h-5 text-white" />;
+  if ([40, 41, 42, 43, 44, 48].includes(num)) return <Train className="w-5 h-5 text-white" />;
+  if ([80, 82, 83, 84, 89].includes(num)) return <Ship className="w-5 h-5 text-white" />;
+  return <Bus className="w-5 h-5 text-white" />;
+};
+
+const getLineColorClass = (lineString: string, agency?: string) => {
+  if (agency === 'WAAB') return 'bg-cyan-600';
+  const lineName = lineString.replace('Linje ', '').trim();
+  const num = parseInt(lineName);
+  
+  const blueBusLines = [1, 2, 3, 4, 5, 6, 172, 173, 176, 177, 178, 179, 471, 474, 670, 676, 677, 873, 875];
+  if (!isNaN(num) && blueBusLines.includes(num)) return 'bg-blue-600';
+  
+  const redBusLines = ![10, 11, 13, 14, 17, 18, 19, 7, 12, 30, 31, 21, 25, 26, 27, 28, 29, 40, 41, 42, 43, 44, 48, 80, 82, 83, 84, 89].includes(num);
+  if (!isNaN(num) && redBusLines) return 'bg-red-600';
+  
+  if ([10, 11].includes(num)) return 'bg-blue-700'; // Blå linje
+  if ([13, 14].includes(num)) return 'bg-red-600'; // Röd linje
+  if ([17, 18, 19].includes(num)) return 'bg-green-600'; // Grön linje
+  if ([40, 41, 42, 43, 44, 48].includes(num)) return 'bg-pink-500'; // Pendeltåg
+  if (num === 7) return 'bg-gray-600';
+  if (num === 12) return 'bg-slate-600';
+  if (num === 21) return 'bg-amber-700';
+  if ([30, 31].includes(num)) return 'bg-orange-600';
+  if ([25, 26].includes(num)) return 'bg-teal-600';
+  if ([27, 28, 29].includes(num)) return 'bg-purple-600';
+  if ([80, 82, 83, 84, 89].includes(num)) return 'bg-cyan-600';
+  
+  return 'bg-blue-600';
 };
 
 const SearchBar: React.FC<SearchBarProps> = ({ 
@@ -47,12 +72,10 @@ const SearchBar: React.FC<SearchBarProps> = ({
     const fetchResults = async () => {
       const q = searchQuery.trim();
       if (q.length > 0) {
-        // Hämta alltid globala linjeresultat så att man kan byta linje
         const globalResults = await slService.search(q, currentAgency);
         const lineResults = globalResults.filter(r => r.type === 'line');
 
         if (activeRoute) {
-            // Om en linje är vald, sök endast efter hållplatser PÅ den linjen
             const filteredStops = activeRoute.stops
                 .filter(s => s.name.toLowerCase().includes(q.toLowerCase()))
                 .slice(0, 10)
@@ -64,7 +87,6 @@ const SearchBar: React.FC<SearchBarProps> = ({
                     agency: activeRoute.agency
                 }));
             
-            // Kombinera: Linjer (globalt) + Hållplatser (lokalt för vald linje)
             setResults([...lineResults, ...filteredStops]);
         } else {
             setResults(globalResults);
@@ -119,6 +141,9 @@ const SearchBar: React.FC<SearchBarProps> = ({
           <div className="border-t border-white/5 max-h-[60vh] overflow-y-auto">
             {results.map((result) => {
               const passage = stopPassages?.get(result.id);
+              const iconContainerColor = result.type === 'line' ? 'bg-blue-500/10' : 'bg-emerald-500/10';
+              const TransportIcon = result.type === 'line' ? getTransportIcon(result.title, result.agency) : <MapPin className="w-5 h-5 text-emerald-500" />;
+
               return (
                 <button
                   key={`${result.type}-${result.id}`}
@@ -131,8 +156,11 @@ const SearchBar: React.FC<SearchBarProps> = ({
                   className="w-full flex items-center justify-between gap-4 px-4 py-3.5 hover:bg-white/5 transition-colors text-left border-b border-white/[0.02] last:border-0"
                 >
                   <div className="flex items-center gap-4 flex-1 min-w-0">
-                    <div className={`p-2.5 rounded-xl ${result.type === 'line' ? 'bg-blue-500/10' : 'bg-emerald-500/10'}`}>
-                      {result.type === 'line' ? getTransportIcon(result.title, result.agency) : <MapPin className="w-5 h-5 text-emerald-500" />}
+                    <div className={`p-2.5 rounded-xl ${iconContainerColor} flex items-center justify-center`}>
+                      {result.type === 'line' ? 
+                        React.cloneElement(TransportIcon as React.ReactElement, { className: 'w-5 h-5 text-blue-400' }) : 
+                        TransportIcon
+                      }
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-bold text-white truncate">{result.title}</div>
@@ -165,15 +193,17 @@ const SearchBar: React.FC<SearchBarProps> = ({
 
       {activeRoute && !searchQuery && (
         <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
-            <div className="flex-1 bg-blue-600 shadow-xl rounded-xl px-4 py-3 flex items-center gap-3 border border-white/10">
-                <MapIcon className="w-4 h-4 text-white/80" />
+            <div className={`flex-1 ${getLineColorClass(activeRoute.line, activeRoute.agency)} shadow-xl rounded-xl px-4 py-3 flex items-center gap-3 border border-white/20`}>
+                <div className="shrink-0 flex items-center justify-center">
+                    {getTransportIcon(activeRoute.line, activeRoute.agency)}
+                </div>
                 <span className="text-sm font-bold text-white truncate">
-                    Linje {activeRoute.line} {activeRoute.stops[0].name} – {activeRoute.stops[activeRoute.stops.length-1].name}
+                    {activeRoute.line}: {activeRoute.stops[0].name} – {activeRoute.stops[activeRoute.stops.length-1].name}
                 </span>
             </div>
             <button 
                 onClick={onClear}
-                className="bg-white/95 backdrop-blur hover:bg-white text-slate-800 p-3 rounded-xl shadow-xl transition-all active:scale-95 border border-black/5"
+                className="bg-white/95 backdrop-blur hover:bg-white text-slate-800 p-3 rounded-xl shadow-xl transition-all active:scale-95 border border-black/5 shrink-0"
             >
                 <X className="w-5 h-5" />
             </button>

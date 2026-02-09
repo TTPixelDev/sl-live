@@ -10,6 +10,15 @@
     <style>
         body, html, #root { height: 100%; margin: 0; padding: 0; overflow: hidden; }
         .leaflet-container { height: 100%; width: 100%; background: #0f172a; }
+        
+        /* Justera Leaflet Panes för att ändra lagerordning */
+        .leaflet-tooltip-pane {
+            z-index: 800 !important; /* Standard för popup-pane är 700, så vi lägger tooltips överst */
+        }
+        .leaflet-popup-pane {
+            z-index: 700 !important;
+        }
+
         .custom-popup .leaflet-popup-content-wrapper {
             border-radius: 16px;
             padding: 0;
@@ -28,9 +37,10 @@
             background: rgba(255, 255, 255, 0.98);
             border: none;
             border-radius: 10px;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2), 0 4px 6px -2px rgba(0, 0, 0, 0.1);
             padding: 6px 12px;
             font-family: ui-sans-serif, system-ui, sans-serif;
+            pointer-events: none;
         }
         .leaflet-div-icon {
             background: transparent;

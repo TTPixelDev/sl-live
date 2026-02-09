@@ -68,7 +68,7 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
     case "070": case "151": case "152": case "700": case "701": case "702": case "705": case "706": case "707": case "709": company = "AB Stockholms Spårvägar"; break;
     case "100": company = "Keolis"; break;
     case "150": company = "VR Sverige"; break;
-    case "251": company = "Connecting Stockholm"; break;
+    case "250": case "251": case "252": company = "Connecting Stockholm"; break;
     case "300": company = "Nobina"; break;
     case "450": case "451": case "452": case "456": case "459": company = "Transdev"; break;
     case "650": company = "SJ Stockholmståg"; break;
@@ -112,7 +112,7 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
                     {vehicle.agency === 'WAAB' ? 'Fartyg' : transportInfo.type}
                 </div>
                 <div className="text-sm font-bold text-white truncate leading-tight">
-                    {hasDestination ? `${lineShortName} mot ${vehicle.destination}` : `Linje ${lineShortName}`}
+                    {hasDestination && `mot ${vehicle.destination}`}
                 </div>
             </div>
         </div>
