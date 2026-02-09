@@ -298,9 +298,9 @@ const App: React.FC = () => {
                                         </div>
                                     )}
                                 </div>
-                            ) : (
+                            ) : selectedVehicleId ? (
                                 <div className="mt-1 text-[9px] text-slate-400 font-bold italic">Kommande hållplats</div>
-                            )}
+                            ) : null}
                         </div>
                     </Tooltip>
                 </CircleMarker>
