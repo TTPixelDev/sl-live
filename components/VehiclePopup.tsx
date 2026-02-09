@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { SLVehicle } from '../types';
+import { Building2, Hash, Gauge, Activity } from 'lucide-react';
 
 interface VehiclePopupProps {
   vehicle: SLVehicle;
@@ -8,7 +9,6 @@ interface VehiclePopupProps {
 }
 
 const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) => {
-  // Extraherar operatörskod (de 3 siffrorna före de sista 4 i id:t)
   const match = /([0-9]{3})([0-9]{4})$/.exec(vehicle.id);
   const companyCode = match ? match[1] : null;
   
@@ -27,66 +27,67 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
     default: company = companyCode ? `Entreprenör ${companyCode}` : "Okänd";
   }
 
-  const vehicleNumber = vehicle.id.slice(-4);
+  const vehicleNumber = vehicle.vehicleNumber || vehicle.id.slice(-4);
   const roundedSpeed = Math.round(vehicle.speed);
   const hasDestination = vehicle.destination && vehicle.destination !== "Okänd";
 
-  // Formatera försening
   const getDelayInfo = () => {
-    if (vehicle.delay === undefined) return { text: "Ingen info", color: "text-gray-400" };
-    
+    if (vehicle.delay === undefined) return { text: "Realtid", color: "text-slate-500" };
     const delayMin = Math.round(vehicle.delay / 60);
-    
-    if (Math.abs(vehicle.delay) < 30) {
-      return { text: "I tid", color: "text-emerald-600" };
-    }
-    
-    if (vehicle.delay > 0) {
-      return { text: `${delayMin} min sen`, color: "text-red-600" };
-    } else {
-      return { text: `${Math.abs(delayMin)} min tidig`, color: "text-blue-600" };
-    }
+    if (Math.abs(vehicle.delay) < 45) return { text: "I tid", color: "text-emerald-600" };
+    if (vehicle.delay > 0) return { text: `${delayMin} min sen`, color: "text-rose-600" };
+    return { text: `${Math.abs(delayMin)} min tidig`, color: "text-sky-600" };
   };
 
   const delayStatus = getDelayInfo();
 
   return (
-    <div className="p-3 bg-white min-w-[240px] text-gray-800 font-sans shadow-sm">
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-        <div className="font-semibold text-gray-400 uppercase tracking-tighter">Linje</div>
-        <div className="text-right font-bold text-blue-600 pr-5">{lineShortName}</div>
-
-        {hasDestination && (
-          <>
-            <div className="font-semibold text-gray-400 uppercase tracking-tighter">Destination</div>
-            <div className="text-right font-bold text-gray-800 break-words" title={vehicle.destination}>
-              {vehicle.destination}
+    <div className="bg-white min-w-[280px] font-sans overflow-hidden">
+      <div className="bg-slate-900 p-4 text-white">
+        <div className="flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-lg shrink-0 ${vehicle.agency === 'WAAB' ? 'bg-cyan-600' : 'bg-blue-600 shadow-lg shadow-blue-500/20'}`}>
+                {lineShortName}
             </div>
-          </>
-        )}
-
-        <div className="font-semibold text-gray-400 uppercase tracking-tighter">Punktlighet</div>
-        <div className={`text-right font-bold ${delayStatus.color}`}>{delayStatus.text}</div>
-
-        <div className="font-semibold text-gray-400 uppercase tracking-tighter">Entreprenör</div>
-        <div className="text-right font-medium">{company}</div>
-        
-        <div className="font-semibold text-gray-400 uppercase tracking-tighter">Vagnsnummer</div>
-        <div className="text-right font-medium">{vehicleNumber}</div>
-        
-        {roundedSpeed >= 0 && (
-          <>
-            <div className="font-semibold text-gray-400 uppercase tracking-tighter">Hastighet</div>
-            <div className="text-right font-medium">{roundedSpeed} km/h</div>
-          </>
-        )}
+            <div className="flex flex-col min-w-0">
+                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">
+                    {vehicle.type === 'Färja' ? 'Fartyg' : 'Buss'}
+                </div>
+                <div className="text-sm font-bold text-white truncate leading-tight">
+                    {hasDestination ? `mot ${vehicle.destination}` : `Linje ${lineShortName}`}
+                </div>
+            </div>
+        </div>
       </div>
-      
-      <div className="mt-3 pt-2 border-t border-gray-100 flex justify-end items-center">
-         <span className="inline-flex items-center gap-1.5 text-[10px] text-emerald-700 font-bold">
-            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
-            Realtid
-         </span>
+
+      <div className="p-4 space-y-4">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+            <div className="space-y-1">
+                <div className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1">
+                    <Building2 className="w-3 h-3" /> Entreprenör
+                </div>
+                <div className="text-xs font-bold text-slate-700 truncate" title={company}>{company}</div>
+            </div>
+            <div className="space-y-1">
+                <div className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1">
+                    <Hash className="w-3 h-3" /> Vagnsnr
+                </div>
+                <div className="text-xs font-bold text-slate-700">{vehicleNumber}</div>
+            </div>
+            <div className="space-y-1">
+                <div className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1">
+                    <Gauge className="w-3 h-3" /> Hastighet
+                </div>
+                <div className="text-xs font-bold text-slate-700">{roundedSpeed} km/h</div>
+            </div>
+            <div className="space-y-1">
+                <div className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1">
+                    <Activity className="w-3 h-3" /> Punktlighet
+                </div>
+                <div className={`text-xs font-bold flex items-center gap-1 ${delayStatus.color}`}>
+                    {delayStatus.text}
+                </div>
+            </div>
+        </div>
       </div>
     </div>
   );

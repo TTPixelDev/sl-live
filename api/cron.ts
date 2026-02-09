@@ -45,17 +45,12 @@ async function fetchAndSaveData(apiKey: string, db: any) {
         return { saved: 0, message: "0 entities returned" };
     }
 
-    // 1. Skapa en map med förseningar från TripUpdates (finns ofta i samma feed eller relaterade)
-    // Eftersom detta API främst är VehiclePositions kanske TripUpdates är glesa, men vi försöker hitta dem.
-    // Om API:et enbart returnerar VehiclePositions här måste vi förlita oss på att TripUpdates hämtas separat,
-    // men för enkelhetens skull i cron-jobbet kollar vi om entiteterna innehåller trip_updates.
     const tripDelays: Record<string, number> = {};
     
     entities.forEach((e: any) => {
         if (e.tripUpdate && e.tripUpdate.trip && e.tripUpdate.trip.tripId) {
             const updates = e.tripUpdate.stopTimeUpdate;
             if (updates && updates.length > 0) {
-                // Ta första bästa försening
                 const first = updates[0];
                 let delay = undefined;
                 if (first.arrival?.delay !== undefined) delay = parseInt(first.arrival.delay);
@@ -79,10 +74,6 @@ async function fetchAndSaveData(apiKey: string, db: any) {
             const routeId = trip.routeId || trip.route_id;
 
             if (!tripId) return null;
-
-            // Försök hitta försening om vi lyckades mappa den, annars undefined
-            // Notera: i GTFS-RT VehiclePositions feeds skickas sällan TripUpdates i samma meddelande.
-            // Men om det finns, använder vi det.
             const delay = tripDelays[tripId];
 
             return {
@@ -103,7 +94,6 @@ async function fetchAndSaveData(apiKey: string, db: any) {
 
     const collection = db.collection("vehicle_trails");
     
-    // Ensure indexes exist (doing this every loop is cheap if they exist)
     await collection.createIndex({ tripId: 1 }, { unique: true });
     await collection.createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 }); 
 
@@ -122,7 +112,7 @@ async function fetchAndSaveData(apiKey: string, db: any) {
                 lat: v.lat,
                 lng: v.lng,
                 ts: now,
-                delay: v.delay // Spara undan förseningen om den finns
+                delay: v.delay
               }
             }
           },
@@ -154,9 +144,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'RT_API_KEY is missing' });
   }
 
-  // Configuration for Pro Plan
-  const TOTAL_RUN_TIME_MS = 58000; // Stop just before the next minute starts (58s)
-  const INTERVAL_MS = 10000; // Target interval: 10 seconds
+  const TOTAL_RUN_TIME_MS = 58000; 
+  const INTERVAL_MS = 5000; // Uppdatera var 5:e sekund för högre precision
   const startTime = Date.now();
 
   try {
@@ -166,7 +155,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const results = [];
     let iterations = 0;
 
-    // Loop logic to fill the minute
     while ((Date.now() - startTime) < TOTAL_RUN_TIME_MS) {
         const loopStart = Date.now();
         iterations++;
@@ -180,13 +168,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             results.push({ iteration: iterations, error: err.message });
         }
 
-        // Calculate time spent processing
         const workDuration = Date.now() - loopStart;
-        
-        // Calculate needed sleep to maintain target interval
         const sleepTime = Math.max(0, INTERVAL_MS - workDuration);
 
-        // Check if sleeping would push us over the total limit
         if ((Date.now() - startTime) + sleepTime >= TOTAL_RUN_TIME_MS) {
             break;
         }

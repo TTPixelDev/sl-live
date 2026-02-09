@@ -1,3 +1,4 @@
+
 import path from 'path';
 import fs from 'fs';
 import yauzl from 'yauzl-promise';
@@ -10,244 +11,200 @@ const ZIP_FILE = path.join(DATA_DIR, 'sweden.zip');
 const PUBLIC_DIR = path.resolve(process.cwd(), 'public');
 const OUT_DIR = path.join(PUBLIC_DIR, 'data');
 const LINES_OUT_DIR = path.join(OUT_DIR, 'lines');
-const SL_AGENCY_ID = '505000000000000001'; // SL:s unika identifierare
 
-// --- Hjälpfunktion för att strömma CSV från en zip-post ---
-async function streamCsvFromEntry(entry, processRow, fileNameForError) {
-    if (!entry) {
-        throw new Error(`Nödvändig fil '${fileNameForError}' hittades inte i zip-arkivet.`);
-    }
+// Mycket viktigt: Agency ID:n enligt analysen
+const AGENCIES = {
+    '505000000000000001': 'SL',
+    '500000000000000114': 'WAAB', // Waxholmsbolaget (registrerat som "114")
+    '505000000000000606': 'WAAB'  // Fallback
+};
+
+// Optimering: Kapa koordinater till 5 decimaler (~1.1 meter precision) för att spara enormt med plats
+const formatCoord = (n) => Number(Number(n).toFixed(5));
+
+async function streamCsvFromEntry(entry, processRow, fileName) {
+    if (!entry) throw new Error(`Filen ${fileName} saknas i zip-filen.`);
     const readStream = await entry.openReadStream();
     const parser = readStream.pipe(parse({
         columns: true,
         skip_empty_lines: true,
     }));
-
     for await (const row of parser) {
         processRow(row);
     }
 }
 
-// --- Huvudfunktion ---
 async function processGTFS() {
-    console.log('--- Startar GTFS-bearbetning för SL ---');
+    console.log('--- Startar Minnesoptimerad GTFS-bearbetning (SL + WÅAB) ---');
 
     if (!fs.existsSync(ZIP_FILE)) {
-        console.error(`\nFEL: Zip-filen hittades inte på sökvägen: ${ZIP_FILE}`);
-        console.error('Ladda ner sweden.zip från Trafiklab och placera den där.');
+        console.error(`FEL: Hittar inte ${ZIP_FILE}`);
         process.exit(1);
     }
-    
-    // Skapa utdatamappar
+
+    if (fs.existsSync(LINES_OUT_DIR)) {
+        fs.rmSync(LINES_OUT_DIR, { recursive: true, force: true });
+    }
     [PUBLIC_DIR, OUT_DIR, LINES_OUT_DIR].forEach(dir => {
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     });
 
     const zipfile = await yauzl.open(ZIP_FILE);
-
-    // Steg 0: Läs in alla filposter i en karta för snabb åtkomst
-    console.log('Läser zip-filens innehållsförteckning...');
     const entries = new Map();
     for await (const entry of zipfile) {
         entries.set(entry.filename, entry);
     }
-    console.log(` -> Hittade ${entries.size} filer.`);
 
     try {
-        // Steg 1: Hitta alla SL-rutter
-        console.log('\n[1/7] Filtrerar SL-rutter...');
-        const slRouteIds = new Set();
+        // [1] Rutter
+        console.log('[1/5] Filtrerar rutter...');
+        const validRouteIds = new Set();
         const routesData = new Map();
         await streamCsvFromEntry(entries.get('routes.txt'), (row) => {
-            if (row.agency_id === SL_AGENCY_ID) {
-                slRouteIds.add(row.route_id);
+            const agency = AGENCIES[row.agency_id];
+            if (agency) {
+                validRouteIds.add(row.route_id);
+                row._app_agency = agency;
                 routesData.set(row.route_id, row);
             }
         }, 'routes.txt');
-        console.log(` -> Hittade ${slRouteIds.size} SL-rutter.`);
 
-        // Steg 2: Hitta alla resor, former och skapa trip -> route mappning
-        console.log('\n[2/7] Filtrerar resor och skapar mappning...');
-        const slTripIds = new Set();
-        const slShapeIds = new Set();
-        const tripsByRoute = new Map();
-        const tripToRouteMap = {};
-        
-        // För att räkna ut vanligaste destinationen per riktning
-        // Struktur: { route_id: { direction_id: { headsign: count } } }
-        const routeDirectionStats = {};
+        // [2] Resor (Hitta bästa turen per rutt direkt)
+        console.log('[2/5] Kartlägger resor och väljer representativa turer...');
+        const tripToRouteMap = new Map();
+        const tripToShapeId = new Map();
+        const routeToBestTrip = new Map(); // route_id -> trip_id
+        const tripStopCounts = new Map();
 
         await streamCsvFromEntry(entries.get('trips.txt'), (row) => {
-            if (slRouteIds.has(row.route_id)) {
-                slTripIds.add(row.trip_id);
-                if (row.shape_id) slShapeIds.add(row.shape_id);
-                
-                if (!tripsByRoute.has(row.route_id)) tripsByRoute.set(row.route_id, []);
-                tripsByRoute.get(row.route_id).push(row);
-                
-                // SPARA BÅDE RUTE-ID OCH DESTINATION (HEADSIGN)
-                tripToRouteMap[row.trip_id] = {
-                    r: row.route_id,
-                    h: row.trip_headsign || ''
-                };
-
-                // Samla statistik för route-directions.json
-                const dir = row.direction_id; // '0' eller '1'
-                const headsign = row.trip_headsign;
-                if (dir !== undefined && dir !== '' && headsign) {
-                    if (!routeDirectionStats[row.route_id]) routeDirectionStats[row.route_id] = {};
-                    if (!routeDirectionStats[row.route_id][dir]) routeDirectionStats[row.route_id][dir] = {};
-                    
-                    const currentCount = routeDirectionStats[row.route_id][dir][headsign] || 0;
-                    routeDirectionStats[row.route_id][dir][headsign] = currentCount + 1;
-                }
+            if (validRouteIds.has(row.route_id)) {
+                tripToRouteMap.set(row.trip_id, row.route_id);
+                if (row.shape_id) tripToShapeId.set(row.trip_id, row.shape_id);
             }
         }, 'trips.txt');
-        console.log(` -> Hittade ${slTripIds.size} SL-resor med ${slShapeIds.size} unika former.`);
 
-        // Steg 3a: Spara trip -> route mappningen
-        console.log('\n[3/7] Sparar mappningsfiler...');
-        fs.writeFileSync(path.join(OUT_DIR, 'trip-to-route.json'), JSON.stringify(tripToRouteMap));
-        
-        // Steg 3b: Skapa och spara route-directions.json (Fallback-data)
-        const routeDirections = {};
-        for (const [rId, dirs] of Object.entries(routeDirectionStats)) {
-            routeDirections[rId] = {};
-            for (const [dId, counts] of Object.entries(dirs)) {
-                // Hitta headsign med högst antal förekomster för denna riktning
-                let bestHeadsign = '';
-                let maxCount = 0;
-                for (const [h, countVal] of Object.entries(counts)) {
-                    const c = Number(countVal);
-                    if (c > maxCount) {
-                        maxCount = c;
-                        bestHeadsign = h;
-                    }
-                }
-                if (bestHeadsign) {
-                    routeDirections[rId][dId] = bestHeadsign;
-                }
-            }
-        }
-        fs.writeFileSync(path.join(OUT_DIR, 'route-directions.json'), JSON.stringify(routeDirections));
-        console.log(` -> Sparade trip-to-route.json och route-directions.json`);
-
-
-        // Steg 4: Hitta alla hållplatstider och unika hållplatser
-        console.log('\n[4/7] Filtrerar hållplatstider...');
-        const slStopIds = new Set();
-        const stopTimesByTrip = new Map();
+        // Räkna stopp per trip för att välja den mest kompletta turen som representant för linjen
         await streamCsvFromEntry(entries.get('stop_times.txt'), (row) => {
-            if (slTripIds.has(row.trip_id)) {
-                slStopIds.add(row.stop_id);
-                if (!stopTimesByTrip.has(row.trip_id)) stopTimesByTrip.set(row.trip_id, []);
-                stopTimesByTrip.get(row.trip_id).push(row);
+            if (tripToRouteMap.has(row.trip_id)) {
+                tripStopCounts.set(row.trip_id, (tripStopCounts.get(row.trip_id) || 0) + 1);
             }
         }, 'stop_times.txt');
-        console.log(` -> Hittade ${stopTimesByTrip.size} resor med avgångstider och ${slStopIds.size} unika hållplatser.`);
-        
-        // Steg 5: Läs in alla relevanta hållplatser och former i minnet
-        console.log('\n[5/7] Laddar hållplats- och form-data...');
+
+        for (const [tripId, routeId] of tripToRouteMap.entries()) {
+            const count = tripStopCounts.get(tripId) || 0;
+            const currentBest = routeToBestTrip.get(routeId);
+            if (!currentBest || count > (tripStopCounts.get(currentBest) || 0)) {
+                routeToBestTrip.set(routeId, tripId);
+            }
+        }
+
+        const selectedTripIds = new Set(routeToBestTrip.values());
+        const selectedShapeIds = new Set();
+        selectedTripIds.forEach(tid => {
+            const sid = tripToShapeId.get(tid);
+            if (sid) selectedShapeIds.add(sid);
+        });
+
+        // [3] Samla in stopp och tider för de utvalda turerna
+        console.log('[3/5] Samlar data för utvalda resor...');
+        const selectedTripStops = new Map(); // trip_id -> stop_id[]
+        const neededStopIds = new Set();
+
+        await streamCsvFromEntry(entries.get('stop_times.txt'), (row) => {
+            if (selectedTripIds.has(row.trip_id)) {
+                if (!selectedTripStops.has(row.trip_id)) selectedTripStops.set(row.trip_id, []);
+                selectedTripStops.get(row.trip_id).push(row);
+                neededStopIds.add(row.stop_id);
+            }
+        }, 'stop_times.txt');
+
         const stopsMap = new Map();
         await streamCsvFromEntry(entries.get('stops.txt'), (row) => {
-            if (slStopIds.has(row.stop_id)) {
-                stopsMap.set(row.stop_id, row);
+            if (neededStopIds.has(row.stop_id)) {
+                stopsMap.set(row.stop_id, {
+                    id: row.stop_id,
+                    name: row.stop_name,
+                    lat: formatCoord(row.stop_lat),
+                    lng: formatCoord(row.stop_lon)
+                });
             }
         }, 'stops.txt');
-        const shapesMap = new Map();
+
+        // [4] Stream shapes (Här sker ofta OOM - vi sparar bara minimal data)
+        console.log('[4/5] Streamar former (Shapes)...');
+        const finalShapesMap = new Map(); // shape_id -> [lat, lng, seq][]
         await streamCsvFromEntry(entries.get('shapes.txt'), (row) => {
-            if (slShapeIds.has(row.shape_id)) {
-                if (!shapesMap.has(row.shape_id)) shapesMap.set(row.shape_id, []);
-                shapesMap.get(row.shape_id).push(row);
+            if (selectedShapeIds.has(row.shape_id)) {
+                if (!finalShapesMap.has(row.shape_id)) finalShapesMap.set(row.shape_id, []);
+                // Spara endast det nödvändiga för att spara minne
+                finalShapesMap.get(row.shape_id).push({
+                    lat: formatCoord(row.shape_pt_lat),
+                    lng: formatCoord(row.shape_pt_lon),
+                    seq: parseInt(row.shape_pt_sequence)
+                });
             }
         }, 'shapes.txt');
-        console.log(` -> Laddade ${stopsMap.size} hållplatser och ${shapesMap.size} former.`);
-        
-        // Steg 6: Spara alla SL-hållplatser till en enda fil
-        console.log('\n[6/7] Sparar alla SL-hållplatser...');
-        const allStops = Array.from(stopsMap.values()).map(s => ({
-            id: s.stop_id,
-            name: s.stop_name,
-            lat: parseFloat(s.stop_lat),
-            lng: parseFloat(s.stop_lon),
-        }));
-        fs.writeFileSync(path.join(OUT_DIR, 'stops.json'), JSON.stringify(allStops));
-        console.log(` -> Sparade ${allStops.length} hållplatser till public/data/stops.json.`);
 
-        // Steg 7: Generera en JSON-fil för varje rutt
-        console.log('\n[7/7] Genererar JSON-filer för varje linje...');
+        // [5] Export
+        console.log('[5/5] Exporterar data...');
         const manifest = [];
-        let generatedCount = 0;
-        
-        for (const routeId of slRouteIds) {
-            const route = routesData.get(routeId);
-            const tripsForRoute = tripsByRoute.get(routeId) || [];
-            if (tripsForRoute.length === 0) continue;
+        const tripToRouteIdJson = {};
 
-            let bestTrip = null;
-            let maxStops = 0;
-            for (const trip of tripsForRoute) {
-                const stopCount = (stopTimesByTrip.get(trip.trip_id) || []).length;
-                if (stopCount > maxStops) {
-                    maxStops = stopCount;
-                    bestTrip = trip;
-                }
-            }
-            if (!bestTrip) continue;
+        for (const [routeId, route] of routesData.entries()) {
+            const tripId = routeToBestTrip.get(routeId);
+            if (!tripId) continue;
 
-            const tripStopsRaw = (stopTimesByTrip.get(bestTrip.trip_id) || [])
-                .sort((a, b) => parseInt(a.stop_sequence) - parseInt(b.stop_sequence));
+            const stimes = (selectedTripStops.get(tripId) || [])
+                .sort((a,b) => parseInt(a.stop_sequence) - parseInt(b.stop_sequence));
             
-            const stops = tripStopsRaw
-                .map(st => stopsMap.get(st.stop_id))
-                .filter(Boolean)
-                .map(s => ({
-                    id: s.stop_id,
-                    name: s.stop_name,
-                    lat: parseFloat(s.stop_lat),
-                    lng: parseFloat(s.stop_lon)
-                }));
-            
+            const stops = stimes.map(st => {
+                const s = stopsMap.get(st.stop_id);
+                if (s) return { ...s, agency: route._app_agency };
+                return null;
+            }).filter(Boolean);
+
             if (stops.length < 2) continue;
 
-            const shapePoints = (shapesMap.get(bestTrip.shape_id) || [])
-                .sort((a, b) => parseInt(a.shape_pt_sequence) - parseInt(b.shape_pt_sequence))
-                .map(s => [parseFloat(s.shape_pt_lat), parseFloat(s.shape_pt_lon)]);
-            
-            const allTripIds = tripsForRoute.map(t => t.trip_id);
+            const shapeId = tripToShapeId.get(tripId);
+            const pathPoints = (finalShapesMap.get(shapeId) || [])
+                .sort((a,b) => a.seq - b.seq)
+                .map(p => [p.lat, p.lng]);
 
-            const output = {
-                id: route.route_id,
-                line: route.route_short_name,
-                description: route.route_long_name,
-                trip_ids: allTripIds,
-                path: shapePoints.length > 0 ? shapePoints : stops.map(s => [s.lat, s.lng]),
+            const lineData = {
+                id: routeId,
+                line: route.route_short_name || route.route_long_name,
+                agency: route._app_agency,
+                path: pathPoints.length > 0 ? pathPoints : stops.map(s => [s.lat, s.lng]),
                 stops: stops
             };
 
-            fs.writeFileSync(path.join(LINES_OUT_DIR, `${route.route_id}.json`), JSON.stringify(output));
+            fs.writeFileSync(path.join(LINES_OUT_DIR, `${routeId}.json`), JSON.stringify(lineData));
+            
             manifest.push({
-                id: route.route_id,
-                line: route.route_short_name,
-                description: route.route_long_name,
+                id: routeId,
+                line: lineData.line,
                 from: stops[0].name,
-                to: stops[stops.length - 1].name
+                to: stops[stops.length-1].name,
+                agency: route._app_agency
             });
-            generatedCount++;
         }
-        
+
+        // Spara globala filer
+        fs.writeFileSync(path.join(OUT_DIR, 'stops.json'), JSON.stringify(Array.from(stopsMap.values())));
         fs.writeFileSync(path.join(OUT_DIR, 'manifest.json'), JSON.stringify(manifest));
-        console.log(` -> Genererade ${generatedCount} linjefiler och en manifest.json.`);
+        
+        // Realtidsmappning - hämta alla trips igen för att ha komplett realtidskoll
+        console.log('Skapar realtidsmappning...');
+        await streamCsvFromEntry(entries.get('trips.txt'), (row) => {
+            if (validRouteIds.has(row.route_id)) {
+                tripToRouteIdJson[row.trip_id] = { r: row.route_id };
+            }
+        }, 'trips.txt');
+        fs.writeFileSync(path.join(OUT_DIR, 'trip-to-route.json'), JSON.stringify(tripToRouteIdJson));
 
-        console.log('\n--- Bearbetning klar! ---');
-        console.log(`All data har sparats i mappen: ${OUT_DIR}`);
-
+        console.log(`✅ Bearbetning klar! ${manifest.length} linjer sparade.`);
     } finally {
         await zipfile.close();
     }
 }
-
-processGTFS().catch(error => {
-    console.error("\nEtt allvarligt fel uppstod:", error);
-    process.exit(1);
-});
+processGTFS();

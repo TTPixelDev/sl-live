@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Bus, MapPin, X, Train, Ship, TramFront, TrainFront } from 'lucide-react';
+import { Search, Bus, MapPin, X, Train, Ship, TramFront, TrainFront, Clock, CheckCircle2, Map as MapIcon, XCircle, Timer } from 'lucide-react';
 import { slService } from '../services/slService';
-import { SearchResult, SLLineRoute, HistoryPoint } from '../types';
+import { SearchResult, SLLineRoute } from '../types';
 
 interface SearchBarProps {
   onSelect: (result: SearchResult) => void;
@@ -11,47 +11,20 @@ interface SearchBarProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
   placeholder?: string;
-  historyPath?: HistoryPoint[];
+  currentAgency: 'SL' | 'WAAB';
+  stopPassages?: Map<string, { time: string, stopped: boolean, duration?: string }>;
 }
 
-const getTransportIcon = (lineString: string) => {
-  // Extrahera linjenummer från titeln "Linje X"
+const getTransportIcon = (lineString: string, agency?: 'SL' | 'WAAB') => {
+  if (agency === 'WAAB') return <Ship className="w-5 h-5 text-blue-400" />;
   const lineName = lineString.replace('Linje ', '').trim();
-
-  // Om linjen innehåller bokstäver (t.ex. 25M), visa alltid buss
-  if (/[a-zA-Z]/.test(lineName)) {
-    return <Bus className="w-5 h-5 text-blue-400" />;
-  }
-
+  if (/[a-zA-Z]/.test(lineName)) return <Bus className="w-5 h-5 text-blue-400" />;
   const num = parseInt(lineName);
   if (isNaN(num)) return <Bus className="w-5 h-5 text-blue-400" />;
-
-  // Tunnelbana (10, 11, 13, 14, 17, 18, 19)
-  if ([10, 11, 13, 14, 17, 18, 19].includes(num)) {
-    return <TrainFront className="w-5 h-5 text-blue-400" />;
-  }
-
-  // Spårvagn (7, 30, 31) + Nockebybanan (12)
-  if ([7, 12, 30, 31].includes(num)) {
-    return <TramFront className="w-5 h-5 text-blue-400" />;
-  }
-
-  // Lokalbana (21, 25, 26, 27, 28, 29)
-  if ([21, 25, 26, 27, 28, 29].includes(num)) {
-    return <TramFront className="w-5 h-5 text-blue-400" />;
-  }
-
-  // Pendeltåg (40, 41, 42, 43, 44, 48)
-  if ([40, 41, 42, 43, 44, 48].includes(num)) {
-    return <Train className="w-5 h-5 text-blue-400" />;
-  }
-
-  // Pendelbåt (80, 82, 83, 84, 89)
-  if ([80, 82, 83, 84, 89].includes(num)) {
-    return <Ship className="w-5 h-5 text-blue-400" />;
-  }
-
-  // Standard: Buss
+  if ([10, 11, 13, 14, 17, 18, 19].includes(num)) return <TrainFront className="w-5 h-5 text-blue-400" />;
+  if ([7, 12, 30, 31, 21, 25, 26, 27, 28, 29].includes(num)) return <TramFront className="w-5 h-5 text-blue-400" />;
+  if ([40, 41, 42, 43, 44, 48].includes(num)) return <Train className="w-5 h-5 text-blue-400" />;
+  if ([80, 82, 83, 84, 89].includes(num)) return <Ship className="w-5 h-5 text-blue-400" />;
   return <Bus className="w-5 h-5 text-blue-400" />;
 };
 
@@ -62,37 +35,49 @@ const SearchBar: React.FC<SearchBarProps> = ({
   searchQuery, 
   onSearchChange,
   placeholder = "Sök linje eller hållplats...",
-  historyPath
+  currentAgency,
+  stopPassages
 }) => {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  
-  // Ref för att spåra om vi precis har gjort ett val.
-  // Detta förhindrar att dropdown-menyn öppnas igen när input-värdet uppdateras efter ett klick.
   const isSelectingRef = useRef(false);
 
   useEffect(() => {
     const fetchResults = async () => {
-      if (searchQuery.trim().length > 0) {
-        // Skicka med historyPath för att kunna visa passerade tider
-        const res = await slService.search(searchQuery, activeRoute, historyPath);
-        setResults(res);
-        
-        // Öppna bara dropdown om vi inte precis har valt något
-        if (!isSelectingRef.current) {
-          setShowDropdown(true);
+      const q = searchQuery.trim();
+      if (q.length > 0) {
+        // Hämta alltid globala linjeresultat så att man kan byta linje
+        const globalResults = await slService.search(q, currentAgency);
+        const lineResults = globalResults.filter(r => r.type === 'line');
+
+        if (activeRoute) {
+            // Om en linje är vald, sök endast efter hållplatser PÅ den linjen
+            const filteredStops = activeRoute.stops
+                .filter(s => s.name.toLowerCase().includes(q.toLowerCase()))
+                .slice(0, 10)
+                .map(s => ({
+                    type: 'stop' as const,
+                    id: s.id,
+                    title: s.name,
+                    subtitle: `På linje ${activeRoute.line}`,
+                    agency: activeRoute.agency
+                }));
+            
+            // Kombinera: Linjer (globalt) + Hållplatser (lokalt för vald linje)
+            setResults([...lineResults, ...filteredStops]);
+        } else {
+            setResults(globalResults);
         }
         
-        // Återställ flaggan efter att effekten kört klart
-        isSelectingRef.current = false;
+        if (!isSelectingRef.current) setShowDropdown(true);
       } else {
         setResults([]);
         setShowDropdown(false);
       }
     };
     fetchResults();
-  }, [searchQuery, activeRoute, historyPath]);
+  }, [searchQuery, currentAgency, activeRoute]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -105,28 +90,24 @@ const SearchBar: React.FC<SearchBarProps> = ({
   }, []);
 
   return (
-    <div ref={containerRef} className="absolute top-4 left-1/2 -translate-x-1/2 z-[2000] w-full max-w-md px-4">
-      <div className="relative bg-zinc-900/90 backdrop-blur-md rounded-2xl shadow-2xl border border-white/10 overflow-hidden">
-        <div className="flex items-center px-4 py-3 gap-3">
+    <div ref={containerRef} className="absolute top-4 left-1/2 -translate-x-1/2 z-[2000] w-full max-w-md px-4 flex flex-col gap-3">
+      <div className="relative bg-zinc-900/95 backdrop-blur-md rounded-2xl shadow-2xl border border-white/10 overflow-hidden">
+        <div className="flex items-center px-4 py-3.5 gap-3">
           <Search className="w-5 h-5 text-zinc-400" />
           <input
             type="text"
-            className="flex-1 bg-transparent text-white outline-none placeholder:text-zinc-500 text-sm"
-            placeholder={placeholder}
+            className="flex-1 bg-transparent text-white outline-none placeholder:text-zinc-500 text-sm font-medium"
+            placeholder={activeRoute ? `Sök hållplats på linje ${activeRoute.line} eller byt linje...` : placeholder}
             value={searchQuery}
             onChange={(e) => {
-              // Om användaren skriver manuellt, se till att vi tillåter dropdown att öppnas
               isSelectingRef.current = false;
               onSearchChange(e.target.value);
             }}
-            onFocus={() => {
-                // Öppna dropdown vid fokus om det finns text och vi inte precis valt något
-                if (searchQuery.length > 0) setShowDropdown(true);
-            }}
+            onFocus={() => { if (searchQuery.length > 0) setShowDropdown(true); }}
           />
           {searchQuery && (
             <button 
-              onClick={() => { onSearchChange(''); onClear(); }}
+              onClick={() => { onSearchChange(''); }}
               className="p-1 hover:bg-zinc-800 rounded-full transition-colors"
             >
               <X className="w-4 h-4 text-zinc-400" />
@@ -135,33 +116,69 @@ const SearchBar: React.FC<SearchBarProps> = ({
         </div>
 
         {showDropdown && results.length > 0 && (
-          <div className="border-t border-white/5 max-h-80 overflow-y-auto">
-            {results.map((result) => (
-              <button
-                key={`${result.type}-${result.id}`}
-                onClick={() => {
-                  isSelectingRef.current = true; // Flagga att vi gör ett val
-                  onSelect(result);
-                  setShowDropdown(false);
-                }}
-                className="w-full flex items-center gap-4 px-4 py-3 hover:bg-white/5 transition-colors text-left"
-              >
-                <div className={`p-2 rounded-lg ${result.type === 'line' ? 'bg-blue-500/20' : 'bg-emerald-500/20'}`}>
-                  {result.type === 'line' ? (
-                    getTransportIcon(result.title)
-                  ) : (
-                    <MapPin className="w-5 h-5 text-emerald-400" />
+          <div className="border-t border-white/5 max-h-[60vh] overflow-y-auto">
+            {results.map((result) => {
+              const passage = stopPassages?.get(result.id);
+              return (
+                <button
+                  key={`${result.type}-${result.id}`}
+                  onClick={() => {
+                    isSelectingRef.current = true;
+                    onSelect(result);
+                    setShowDropdown(false);
+                    onSearchChange('');
+                  }}
+                  className="w-full flex items-center justify-between gap-4 px-4 py-3.5 hover:bg-white/5 transition-colors text-left border-b border-white/[0.02] last:border-0"
+                >
+                  <div className="flex items-center gap-4 flex-1 min-w-0">
+                    <div className={`p-2.5 rounded-xl ${result.type === 'line' ? 'bg-blue-500/10' : 'bg-emerald-500/10'}`}>
+                      {result.type === 'line' ? getTransportIcon(result.title, result.agency) : <MapPin className="w-5 h-5 text-emerald-500" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-bold text-white truncate">{result.title}</div>
+                      <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">{result.subtitle}</div>
+                    </div>
+                  </div>
+                  {passage && (
+                    <div className="text-right flex flex-col items-end gap-0.5 shrink-0">
+                        <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-bold">
+                            <Clock className="w-3.5 h-3.5" />
+                            {passage.stopped ? 'Stannade' : 'Passerade'} {passage.time}
+                        </div>
+                        {passage.duration && (
+                            <div className="flex items-center gap-1 text-[9px] text-zinc-500 font-bold">
+                                <Timer className="w-2.5 h-2.5" />
+                                Stopptid: {passage.duration}
+                            </div>
+                        )}
+                        {!passage.duration && !passage.stopped && (
+                            <XCircle className="w-3.5 h-3.5 text-amber-500 opacity-60" />
+                        )}
+                    </div>
                   )}
-                </div>
-                <div>
-                  <div className="text-sm font-medium text-white">{result.title}</div>
-                  {result.subtitle && <div className="text-xs text-zinc-400">{result.subtitle}</div>}
-                </div>
-              </button>
-            ))}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
+
+      {activeRoute && !searchQuery && (
+        <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
+            <div className="flex-1 bg-blue-600 shadow-xl rounded-xl px-4 py-3 flex items-center gap-3 border border-white/10">
+                <MapIcon className="w-4 h-4 text-white/80" />
+                <span className="text-sm font-bold text-white truncate">
+                    Linje {activeRoute.line} {activeRoute.stops[0].name} – {activeRoute.stops[activeRoute.stops.length-1].name}
+                </span>
+            </div>
+            <button 
+                onClick={onClear}
+                className="bg-white/95 backdrop-blur hover:bg-white text-slate-800 p-3 rounded-xl shadow-xl transition-all active:scale-95 border border-black/5"
+            >
+                <X className="w-5 h-5" />
+            </button>
+        </div>
+      )}
     </div>
   );
 };

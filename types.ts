@@ -5,11 +5,12 @@ export interface SLStop {
   lat: number;
   lng: number;
   lines: string[];
+  agency?: 'SL' | 'WAAB';
 }
 
 export interface SLVehicle {
   id: string;
-  line: string; // Detta kommer vara route_id
+  line: string; 
   tripId: string;
   operator: string;
   vehicleNumber: string;
@@ -18,16 +19,17 @@ export interface SLVehicle {
   bearing: number;
   speed: number;
   destination: string;
-  type: 'Buss' | 'Tåg' | 'Tunnelbana' | 'Spårvagn';
-  delay?: number; // Försening i sekunder
+  type: 'Buss' | 'Tåg' | 'Tunnelbana' | 'Spårvagn' | 'Färja';
+  delay?: number; 
+  agency?: 'SL' | 'WAAB';
 }
 
 export interface SLLineRoute {
-  id: string; // route_id
-  line: string; // short name, t.ex. "191"
-  trip_ids: string[];
+  id: string; 
+  line: string; 
   path: [number, number][];
   stops: SLStop[];
+  agency?: 'SL' | 'WAAB';
 }
 
 export interface SearchResult {
@@ -35,6 +37,7 @@ export interface SearchResult {
   id: string;
   title: string;
   subtitle?: string;
+  agency?: 'SL' | 'WAAB';
 }
 
 export interface HistoryPoint {

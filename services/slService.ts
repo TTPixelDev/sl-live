@@ -3,9 +3,9 @@ import { SLStop, SLLineRoute, SearchResult, SLVehicle, HistoryPoint } from '../t
 // @ts-ignore
 import protobuf from 'protobufjs';
 
-const DB_NAME = 'SL_Tracker_DB_v3';
+const DB_NAME = 'SL_Tracker_DB_v6';
 const DB_VERSION = 1;
-const STATIC_TS_KEY = 'sl_static_timestamp_v2';
+const STATIC_TS_KEY = 'sl_static_timestamp_v6';
 const CACHE_DURATION = 1000 * 60 * 60 * 24 * 7; 
 
 const RT_VEHICLE_URL = '/api/gtfs-rt';
@@ -14,64 +14,15 @@ const RT_TRIP_UPDATES_URL = '/api/trip-updates';
 export interface LineManifestEntry {
     id: string;
     line: string;
-    description: string;
+    description?: string;
     from: string;
     to: string;
+    agency: 'SL' | 'WAAB';
 }
 
 interface TripMapEntry {
   r: string; // route_id
-  h: string; // headsign
-}
-
-// Map: RouteID -> DirectionID -> Headsign
-interface RouteDirectionMap {
-    [routeId: string]: {
-        [directionId: string]: string;
-    }
-}
-
-interface TripUpdateInfo {
-    delay?: number;
-    directionId?: number;
-    routeId?: string;
-    lastStopId?: string;
-}
-
-// Helper för att beräkna avstånd i meter
-function getDistanceFromLatLonInM(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371e3; // Radius of the earth in km
-  const dLat = deg2rad(lat2 - lat1);
-  const dLon = deg2rad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c; 
-}
-
-function deg2rad(deg: number) {
-  return deg * (Math.PI / 180);
-}
-
-// Helper för att formatera sekunder till läsbar tid
-function formatDuration(seconds: number) {
-    if (seconds < 60) return `${Math.round(seconds)}s`;
-    const min = Math.floor(seconds / 60);
-    const sec = Math.round(seconds % 60);
-    return sec > 0 ? `${min}m ${sec}s` : `${min}m`;
-}
-
-function getDelayText(delay?: number) {
-    if (delay === undefined || delay === null) return "";
-    const absDelay = Math.abs(delay);
-    const min = Math.round(absDelay / 60);
-    
-    // Tolerans på 60 sekunder räknas som i tid
-    if (absDelay < 60) return " • I tid";
-    if (delay > 0) return ` • ${min} min sen`;
-    return ` • ${min} min tidig`;
+  h?: string; // headsign
 }
 
 class SLService {
@@ -79,12 +30,10 @@ class SLService {
   private isInitialized = false;
   private rtRoot: any = null;
   private tripToRouteMap: Record<string, TripMapEntry> | null = null;
-  private routeDirections: RouteDirectionMap | null = null;
   private stopsMap: Map<string, string> = new Map();
+  private manifest: LineManifestEntry[] = [];
 
-  public areKeysConfigured(): boolean {
-    return true; 
-  }
+  public areKeysConfigured(): boolean { return true; }
 
   private async getDB(): Promise<IDBDatabase> {
     if (this.db) return this.db;
@@ -94,17 +43,10 @@ class SLService {
         const db = request.result;
         if (db.objectStoreNames.contains('stops')) db.deleteObjectStore('stops');
         if (db.objectStoreNames.contains('routes')) db.deleteObjectStore('routes');
-        
-        const stopStore = db.createObjectStore('stops', { keyPath: 'id' });
-        stopStore.createIndex('name', 'name', { unique: false });
-        
-        const routeStore = db.createObjectStore('routes', { keyPath: 'id' });
-        routeStore.createIndex('line', 'line', { unique: false });
+        db.createObjectStore('stops', { keyPath: 'id' }).createIndex('name', 'name');
+        db.createObjectStore('routes', { keyPath: 'id' }).createIndex('line', 'line');
       };
-      request.onsuccess = () => {
-        this.db = request.result;
-        resolve(this.db);
-      };
+      request.onsuccess = () => { this.db = request.result; resolve(this.db); };
       request.onerror = () => reject(request.error);
     });
   }
@@ -113,476 +55,211 @@ class SLService {
     if (this.isInitialized) return;
     await this.getDB();
     const lastUpdate = localStorage.getItem(STATIC_TS_KEY);
-    const now = Date.now();
-    
-    // Antingen ladda från filer eller från DB om vi har cache
-    if (!lastUpdate || (now - parseInt(lastUpdate)) > CACHE_DURATION) {
+    if (!lastUpdate || (Date.now() - parseInt(lastUpdate)) > CACHE_DURATION) {
       await this.loadStaticDataFromFiles();
     } else {
       await this.loadStopsFromDB();
+      this.manifest = await this.getManifestFromDB();
     }
-    
     await this.loadAuxiliaryMaps();
     this.isInitialized = true;
   }
 
-  private isJson(response: Response) {
-    const contentType = response.headers.get('content-type');
-    return contentType && contentType.includes('application/json');
+  async getManifest(): Promise<LineManifestEntry[]> {
+    await this.initialize();
+    return this.manifest;
   }
 
   private async loadAuxiliaryMaps() {
     try {
-        const [tripRes, dirRes] = await Promise.all([
-            fetch(`/data/trip-to-route.json?v=${Date.now()}`), 
-            fetch(`/data/route-directions.json?v=${Date.now()}`)
-        ]);
-
-        if (tripRes.ok && this.isJson(tripRes)) {
-            this.tripToRouteMap = await tripRes.json();
-        }
-
-        if (dirRes.ok && this.isJson(dirRes)) {
-            this.routeDirections = await dirRes.json();
-        }
-    } catch(e) {
-        console.warn("Kunde inte ladda hjälpkartor:", e);
-    }
+        const tripRes = await fetch(`/data/trip-to-route.json?v=${Date.now()}`);
+        if (tripRes.ok) this.tripToRouteMap = await tripRes.json();
+    } catch(e) { console.warn("Hjälpkartor saknas."); }
   }
 
   private async loadStopsFromDB() {
       const db = await this.getDB();
-      return new Promise<void>((resolve) => {
-          const tx = db.transaction('stops', 'readonly');
-          const store = tx.objectStore('stops');
-          const req = store.getAll();
-          req.onsuccess = () => {
-              if (req.result) {
-                  req.result.forEach((s: SLStop) => this.stopsMap.set(s.id, s.name));
-              }
-              resolve();
-          };
-          req.onerror = () => resolve();
-      });
+      const tx = db.transaction('stops', 'readonly');
+      const req = tx.objectStore('stops').getAll();
+      req.onsuccess = () => { if (req.result) req.result.forEach((s: SLStop) => this.stopsMap.set(s.id, s.name)); };
+  }
+
+  private async getManifestFromDB(): Promise<LineManifestEntry[]> {
+    const db = await this.getDB();
+    return new Promise(resolve => {
+        const req = db.transaction('routes', 'readonly').objectStore('routes').getAll();
+        req.onsuccess = () => resolve(req.result);
+    });
   }
 
   private async loadStaticDataFromFiles() {
     try {
-      const [manifestRes, stopsRes] = await Promise.all([
-        fetch('/data/manifest.json'),
-        fetch('/data/stops.json')
-      ]);
-
-      if (!manifestRes.ok || !stopsRes.ok || !this.isJson(manifestRes) || !this.isJson(stopsRes)) {
-         throw new Error(`Static files missing or invalid format.`);
-      }
-
-      const manifest = await manifestRes.json();
+      const [manifestRes, stopsRes] = await Promise.all([fetch('/data/manifest.json'), fetch('/data/stops.json')]);
+      this.manifest = await manifestRes.json();
       const stops: SLStop[] = await stopsRes.json();
-
-      // Uppdatera stopsMap i minnet
       stops.forEach(s => this.stopsMap.set(s.id, s.name));
 
       const db = await this.getDB();
       const tx = db.transaction(['stops', 'routes'], 'readwrite');
-      const stopStore = tx.objectStore('stops');
-      const routeStore = tx.objectStore('routes');
-
-      stopStore.clear();
-      routeStore.clear();
-
-      stops.forEach((stop: SLStop) => stopStore.put(stop));
-      manifest.forEach((route: LineManifestEntry) => routeStore.put(route));
-
-      await new Promise<void>((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-      
+      stops.forEach(s => tx.objectStore('stops').put(s));
+      this.manifest.forEach((r: LineManifestEntry) => tx.objectStore('routes').put(r));
       localStorage.setItem(STATIC_TS_KEY, Date.now().toString());
-    } catch (e) {
-      console.warn("Varning: Kunde inte ladda statisk data.", e);
-    }
+    } catch (e) { console.error("Kunde inte ladda data."); }
   }
   
-  async search(query: string, activeRoute?: SLLineRoute | null, vehicleHistory?: HistoryPoint[]): Promise<SearchResult[]> {
+  async search(query: string, currentAgency: 'SL' | 'WAAB'): Promise<SearchResult[]> {
     await this.initialize();
     if (query.trim().length < 1) return [];
-
     const q = query.toLowerCase();
     const db = await this.getDB();
 
-    if (activeRoute && activeRoute.stops) {
-        const stopResults = activeRoute.stops
-            .filter(stop => stop.name.toLowerCase().includes(q))
-            .map(stop => {
-                let infoSubtitle = "";
-                
-                // Om vi har historik, analysera passagen
-                if (vehicleHistory && vehicleHistory.length > 0) {
-                    // Hitta alla punkter inom en viss radie (50m)
-                    const pointsInZone = vehicleHistory.filter(point => 
-                        getDistanceFromLatLonInM(stop.lat, stop.lng, point.lat, point.lng) < 50
-                    ).sort((a, b) => a.ts - b.ts);
-
-                    if (pointsInZone.length > 0) {
-                        const arrivalPoint = pointsInZone[0];
-                        const departurePoint = pointsInZone[pointsInZone.length - 1];
-                        
-                        const arrivalTime = new Date(arrivalPoint.ts).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
-                        const dwellTimeMs = departurePoint.ts - arrivalPoint.ts;
-                        const dwellTimeSec = dwellTimeMs / 1000;
-                        
-                        // Hämta försening från punkten (om den sparats)
-                        const delayText = getDelayText(arrivalPoint.delay);
-
-                        // Om bussen stannade mer än 20 sekunder räknar vi det som ett stopp
-                        if (dwellTimeSec > 20) {
-                            infoSubtitle = ` • Stannade ${formatDuration(dwellTimeSec)} (${arrivalTime})${delayText}`;
-                        } else {
-                            infoSubtitle = ` • Passerade ${arrivalTime}${delayText}`;
-                        }
-                    }
-                }
-
-                return {
-                    type: 'stop' as const,
-                    id: stop.id,
-                    title: stop.name,
-                    subtitle: `På linje ${activeRoute.line}${infoSubtitle}`
-                };
-            });
+    return new Promise(resolve => {
+        const results: SearchResult[] = [];
+        const tx = db.transaction(['routes', 'stops'], 'readonly');
         
-        const lineResults = await this.searchLines(q, db);
-        return [...lineResults, ...stopResults].slice(0, 15);
-    }
-
-    const [stops, lines] = await Promise.all([
-        this.searchStops(q, db),
-        this.searchLines(q, db)
-    ]);
-    return [...lines, ...stops].slice(0, 15);
-  }
-
-  private async searchLines(query: string, db: IDBDatabase): Promise<SearchResult[]> {
-    return new Promise<SearchResult[]>(resolve => {
-        const results: SearchResult[] = [];
-        const tx = db.transaction('routes', 'readonly');
-        const store = tx.objectStore('routes');
-        store.index('line').openCursor().onsuccess = (event) => {
-            const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+        tx.objectStore('routes').openCursor().onsuccess = (e) => {
+            const cursor = (e.target as any).result;
             if (cursor) {
-                const route = cursor.value as LineManifestEntry;
-                if (route.line.toLowerCase().startsWith(query)) {
-                    results.push({ type: 'line', id: route.id, title: `Linje ${route.line}`, subtitle: `${route.from} - ${route.to}` });
+                const r = cursor.value as LineManifestEntry;
+                if (r.line.toLowerCase().startsWith(q) && r.agency === currentAgency) {
+                    results.push({ type: 'line', id: r.id, title: `Linje ${r.line}`, subtitle: `${r.from} - ${r.to}`, agency: r.agency });
                 }
-                 if (results.length < 10) cursor.continue(); else resolve(results);
+                cursor.continue();
             } else {
-                resolve(results);
-            }
-        };
-    });
-  }
-
-  private async searchStops(query: string, db: IDBDatabase): Promise<SearchResult[]> {
-    return new Promise<SearchResult[]>(resolve => {
-        const results: SearchResult[] = [];
-        const tx = db.transaction('stops', 'readonly');
-        const store = tx.objectStore('stops');
-        store.index('name').openCursor().onsuccess = (event) => {
-            const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
-            if (cursor) {
-                const stop = cursor.value as SLStop;
-                if (stop.name.toLowerCase().includes(query)) {
-                    results.push({ type: 'stop', id: stop.id, title: stop.name, subtitle: `Hållplats` });
-                }
-                if (results.length < 10) cursor.continue(); else resolve(results);
-            } else {
-                resolve(results);
+                tx.objectStore('stops').openCursor().onsuccess = (e2) => {
+                    const c2 = (e2.target as any).result;
+                    if (c2 && results.length < 15) {
+                        const s = c2.value as SLStop;
+                        const stopAgency = s.agency || 'SL';
+                        if (s.name.toLowerCase().includes(q) && stopAgency === currentAgency) {
+                            results.push({ type: 'stop', id: s.id, title: s.name, subtitle: currentAgency === 'WAAB' ? 'Brygga' : 'Hållplats', agency: stopAgency });
+                        }
+                        c2.continue();
+                    } else resolve(results);
+                };
             }
         };
     });
   }
 
   async getLineRoute(routeId: string): Promise<SLLineRoute | null> {
-    try {
-        const response = await fetch(`/data/lines/${routeId}.json`);
-        if (!response.ok || !this.isJson(response)) throw new Error('Line data not found');
-        const lineData = await response.json();
-        
-        const stops: SLStop[] = lineData.stops.map((s: any) => ({
-            id: s.id,
-            name: s.name,
-            lat: s.lat,
-            lng: s.lng,
-            lines: []
-        }));
-        
-        return {
-            id: lineData.id,
-            line: lineData.line,
-            trip_ids: lineData.trip_ids,
-            path: lineData.path,
-            stops: stops
-        };
-    } catch (e) {
-        return null;
-    }
+    const res = await fetch(`/data/lines/${routeId}.json`);
+    if (!res.ok) return null;
+    return await res.json();
   }
 
   async getStopInfo(stopId: string): Promise<SLStop | null> {
-    await this.initialize();
     const db = await this.getDB();
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       const req = db.transaction('stops', 'readonly').objectStore('stops').get(stopId);
-      req.onsuccess = () => resolve(req.result || null);
+      req.onsuccess = () => resolve(req.result);
     });
   }
 
-  async getManifest(): Promise<LineManifestEntry[]> {
-      await this.initialize();
-      const db = await this.getDB();
-      return new Promise((resolve, reject) => {
-          const tx = db.transaction('routes', 'readonly');
-          const store = tx.objectStore('routes');
-          const req = store.getAll();
-          req.onsuccess = () => resolve(req.result);
-          req.onerror = () => reject(req.error);
-      });
-  }
-
-  async getVehicleHistory(tripId: string): Promise<HistoryPoint[]> {
-      try {
-          const res = await fetch(`/api/history?tripId=${tripId}`);
-          if (!res.ok) return [];
-          const data = await res.json();
-          return data.path || [];
-      } catch (e) {
-          console.error("Failed to fetch history", e);
-          return [];
-      }
-  }
-
-  // Sök efter en specifik vagn globalt
-  async findVehicle(vehicleNumber: string): Promise<{vehicle: SLVehicle, routeId: string} | null> {
-      try {
-        if (!this.isInitialized) await this.initialize();
-      } catch (initErr) {
-        console.error("Initialization failed in findVehicle:", initErr);
-        return null; 
-      }
-      
-      try {
-          const posRes = await fetch(RT_VEHICLE_URL);
-          if (!posRes.ok) throw new Error(`API Error: ${posRes.status}`);
-          const posBuffer = await posRes.arrayBuffer();
-          
-          const root = await this.getRTRoot();
-          const FeedMessage = root.lookupType("transit_realtime.FeedMessage");
-          const posMessage = FeedMessage.decode(new Uint8Array(posBuffer));
-          const posObject = FeedMessage.toObject(posMessage, { enums: String, longs: String });
-          const posEntities = posObject.entity || [];
-          
-          const target = vehicleNumber.trim();
-
-          for (const e of posEntities) {
-              const v = e.vehicle;
-              if (v && v.vehicle) {
-                  const label = v.vehicle.label ? String(v.vehicle.label).trim() : '';
-                  const vid = v.vehicle.id ? String(v.vehicle.id).trim() : '';
-                  
-                  if (label === target || (vid && vid.endsWith(target))) {
-                       const tripId = v.trip?.tripId || v.trip?.trip_id;
-                       let routeId = v.trip?.routeId || v.trip?.route_id;
-
-                       if (tripId && this.tripToRouteMap && this.tripToRouteMap[tripId]) {
-                           routeId = this.tripToRouteMap[tripId].r;
-                       }
-
-                       if (routeId) {
-                           return {
-                               vehicle: {
-                                   id: v.vehicle.id || e.id,
-                                   line: routeId,
-                                   tripId: tripId || "",
-                                   operator: "SL",
-                                   vehicleNumber: v.vehicle.label || vid.slice(-4),
-                                   lat: v.position.latitude,
-                                   lng: v.position.longitude,
-                                   bearing: v.position.bearing || 0,
-                                   speed: (v.position.speed || 0) * 3.6,
-                                   destination: "", 
-                                   type: "Buss"
-                               },
-                               routeId: routeId
-                           };
-                       }
-                  }
-              }
-          }
-          return null;
-      } catch (e) {
-          console.error("Fel vid fordonssökning (detaljer):", e);
-          return null;
-      }
-  }
-
-  async getLiveVehicles(route?: SLLineRoute | null): Promise<SLVehicle[]> {
-    if (!this.isInitialized) await this.initialize();
-
+  async getLiveVehicles(currentAgency?: 'SL' | 'WAAB'): Promise<SLVehicle[]> {
+    await this.initialize();
     try {
+        // Hämta både positioner och förseningar parallellt
         const [posRes, updatesRes] = await Promise.all([
-            fetch(RT_VEHICLE_URL),
-            fetch(RT_TRIP_UPDATES_URL).catch(() => null)
+          fetch(RT_VEHICLE_URL),
+          fetch(RT_TRIP_UPDATES_URL)
         ]);
 
-        if (!posRes.ok) throw new Error(`API Error: ${posRes.status}`);
-        
-        const posBuffer = await posRes.arrayBuffer();
-        if (posBuffer.byteLength < 20) return [];
+        const [posBuffer, updatesBuffer] = await Promise.all([
+          posRes.arrayBuffer(),
+          updatesRes.arrayBuffer()
+        ]);
 
         const root = await this.getRTRoot();
         const FeedMessage = root.lookupType("transit_realtime.FeedMessage");
         
         const posMessage = FeedMessage.decode(new Uint8Array(posBuffer));
         const posObject = FeedMessage.toObject(posMessage, { enums: String, longs: String });
-        const posEntities = posObject.entity || [];
 
-        const tripInfoMap: Map<string, TripUpdateInfo> = new Map();
+        const updatesMessage = FeedMessage.decode(new Uint8Array(updatesBuffer));
+        const updatesObject = FeedMessage.toObject(updatesMessage, { enums: String, longs: String });
 
-        if (updatesRes && updatesRes.ok) {
-            const updatesBuffer = await updatesRes.arrayBuffer();
-            const updatesMessage = FeedMessage.decode(new Uint8Array(updatesBuffer));
-            const updatesObject = FeedMessage.toObject(updatesMessage, { enums: String, longs: String });
-            const updateEntities = updatesObject.entity || [];
-
-            for (const e of updateEntities) {
-                if (e.tripUpdate && e.tripUpdate.trip) {
-                    const tripId = e.tripUpdate.trip.tripId || e.tripUpdate.trip.trip_id;
-                    const routeId = e.tripUpdate.trip.routeId || e.tripUpdate.trip.route_id;
-                    const directionId = e.tripUpdate.trip.directionId ?? e.tripUpdate.trip.direction_id;
-
-                    if (tripId) {
-                        let delay = undefined;
-                        let lastStopId = undefined;
-
-                        if (e.tripUpdate.stopTimeUpdate && e.tripUpdate.stopTimeUpdate.length > 0) {
-                            const updates = e.tripUpdate.stopTimeUpdate;
-                            const firstUpdate = updates[0];
-                            if (firstUpdate) {
-                                if (firstUpdate.arrival && firstUpdate.arrival.delay !== undefined) {
-                                    delay = parseInt(firstUpdate.arrival.delay);
-                                } else if (firstUpdate.departure && firstUpdate.departure.delay !== undefined) {
-                                    delay = parseInt(firstUpdate.departure.delay);
-                                }
-                            }
-                            
-                            const lastUpdate = updates[updates.length - 1];
-                            if (lastUpdate) {
-                                lastStopId = lastUpdate.stopId || lastUpdate.stop_id;
-                            }
-                        }
-                        tripInfoMap.set(tripId, { delay, directionId, routeId, lastStopId });
-                    }
+        // Mappa tripId -> delay
+        const delays: Record<string, number> = {};
+        (updatesObject.entity || []).forEach((e: any) => {
+            if (e.tripUpdate && e.tripUpdate.trip) {
+                const tId = e.tripUpdate.trip.tripId;
+                const stu = e.tripUpdate.stopTimeUpdate;
+                if (stu && stu.length > 0) {
+                    const first = stu[0];
+                    if (first.arrival?.delay !== undefined) delays[tId] = first.arrival.delay;
+                    else if (first.departure?.delay !== undefined) delays[tId] = first.departure.delay;
                 }
             }
-        }
+        });
         
-        const allVehicles: SLVehicle[] = [];
-        for (const e of posEntities) {
-            const v = e.vehicle;
-            if (!v || !v.position || !v.trip) continue;
-
+        const vehicles: SLVehicle[] = [];
+        for (const entity of (posObject.entity || [])) {
+            const v = entity.vehicle;
+            if (!v || !v.trip || !v.position) continue;
             const tripId = v.trip.tripId || v.trip.trip_id;
-            if (!tripId) continue;
-            
-            let routeId = v.trip.routeId || v.trip.route_id;
-            let directionId = v.trip.directionId ?? v.trip.direction_id;
-            
-            const info = tripInfoMap.get(tripId);
-            if (info) {
-                if (directionId === undefined || directionId === null) directionId = info.directionId;
-                if (!routeId) routeId = info.routeId;
-            }
+            const mapInfo = this.tripToRouteMap?.[tripId];
+            if (!mapInfo) continue;
 
-            let headsign = "Okänd";
+            const routeId = mapInfo.r;
+            const routeManifest = this.manifest.find(m => m.id === routeId);
+            if (!routeManifest) continue;
 
-            if (this.tripToRouteMap && this.tripToRouteMap[tripId]) {
-                const mapEntry = this.tripToRouteMap[tripId];
-                if (!routeId) routeId = mapEntry.r; 
-                if (mapEntry.h) headsign = mapEntry.h;
-            }
+            if (currentAgency && routeManifest.agency !== currentAgency) continue;
 
-            if ((!headsign || headsign === "Okänd") && routeId && directionId !== undefined && directionId !== null && this.routeDirections) {
-                const dirStr = String(directionId);
-                const fallbackHeadsign = this.routeDirections[routeId]?.[dirStr];
-                if (fallbackHeadsign) {
-                    headsign = fallbackHeadsign;
-                }
-            }
-
-            if ((!headsign || headsign === "Okänd") && info?.lastStopId) {
-                const stopName = this.stopsMap.get(info.lastStopId);
-                if (stopName) {
-                    headsign = stopName;
-                }
-            }
-
-            if (!routeId) continue;
-
-            allVehicles.push({
-                id: v.vehicle?.id || e.id,
+            vehicles.push({
+                id: v.vehicle?.id || entity.id,
                 line: routeId,
                 tripId: tripId,
-                operator: "SL / Entreprenör",
-                vehicleNumber: v.vehicle?.label || "N/A",
+                operator: routeManifest.agency === 'WAAB' ? "Blidösundsbolaget" : "SL",
+                vehicleNumber: v.vehicle?.label || v.vehicle?.id?.slice(-4) || "N/A",
                 lat: v.position.latitude,
                 lng: v.position.longitude,
                 bearing: v.position.bearing || 0,
                 speed: (v.position.speed || 0) * 3.6,
-                destination: headsign,
-                type: "Buss",
-                delay: info?.delay
+                destination: mapInfo.h || "Okänd",
+                type: routeManifest.agency === 'WAAB' ? 'Färja' : 'Buss',
+                agency: routeManifest.agency,
+                delay: delays[tripId]
             });
         }
-
-        if (!route) {
-            return allVehicles;
-        }
-
-        const tripIdSet = new Set(route.trip_ids);
-        let filteredVehicles = allVehicles.filter(v => tripIdSet.has(v.tripId));
-        
-        if (filteredVehicles.length === 0 && allVehicles.length > 0) {
-          filteredVehicles = allVehicles.filter(v => v.line === route.id);
-        }
-
-        return filteredVehicles;
-    } catch(e) {
+        return vehicles;
+    } catch(e) { 
         console.error("Fel vid hämtning av realtidsdata:", e);
-        return [];
+        return []; 
     }
   }
-  
+
+  async findVehicle(vNum: string): Promise<{vehicle: SLVehicle, routeId: string} | null> {
+    const all = await this.getLiveVehicles();
+    const found = all.find(v => v.vehicleNumber === vNum || v.id.endsWith(vNum));
+    return found ? { vehicle: found, routeId: found.line } : null;
+  }
+
+  async getVehicleHistory(tripId: string): Promise<HistoryPoint[]> {
+      const res = await fetch(`/api/history?tripId=${tripId}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.path || [];
+  }
+
   private async getRTRoot() {
     if (this.rtRoot) return this.rtRoot;
     this.rtRoot = await protobuf.parse(`
       syntax = "proto2";
       package transit_realtime;
       message FeedMessage { required FeedHeader header = 1; repeated FeedEntity entity = 2; }
-      message FeedHeader { required string gtfs_realtime_version = 1; optional Incrementality incrementality = 2 [default = FULL_DATASET]; optional uint64 timestamp = 3; enum Incrementality { FULL_DATASET = 0; DIFFERENTIAL = 1; } }
-      message FeedEntity { required string id = 1; optional bool is_deleted = 2 [default = false]; optional TripUpdate trip_update = 3; optional VehiclePosition vehicle = 4; optional Alert alert = 5; }
-      message VehiclePosition { optional TripDescriptor trip = 1; optional VehicleDescriptor vehicle = 8; optional Position position = 2; optional uint64 timestamp = 5; }
+      message FeedHeader { required string gtfs_realtime_version = 1; optional uint64 timestamp = 3; }
+      message FeedEntity { required string id = 1; optional VehiclePosition vehicle = 4; optional TripUpdate trip_update = 3; }
+      message VehiclePosition { optional TripDescriptor trip = 1; optional VehicleDescriptor vehicle = 8; optional Position position = 2; }
       message TripUpdate { optional TripDescriptor trip = 1; repeated StopTimeUpdate stop_time_update = 2; }
       message StopTimeUpdate { optional uint32 stop_sequence = 1; optional string stop_id = 4; optional StopTimeEvent arrival = 2; optional StopTimeEvent departure = 3; }
-      message StopTimeEvent { optional int32 delay = 1; optional int64 time = 2; optional int32 uncertainty = 3; }
-      message TripDescriptor { optional string trip_id = 1; optional string route_id = 5; optional uint32 direction_id = 6; }
-      message VehicleDescriptor { optional string id = 1; optional string label = 2; optional string license_plate = 3; }
+      message StopTimeEvent { optional int32 delay = 1; optional int64 time = 2; }
+      message TripDescriptor { optional string trip_id = 1; optional string route_id = 5; }
+      message VehicleDescriptor { optional string id = 1; optional string label = 2; }
       message Position { required float latitude = 1; required float longitude = 2; optional float bearing = 3; optional float speed = 5; }
-      message Alert {}
     `).root;
     return this.rtRoot;
   }
 }
-
 export const slService = new SLService();
