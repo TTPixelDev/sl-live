@@ -271,7 +271,7 @@ const App: React.FC = () => {
             </div>
         </div>
         <div className="pointer-events-auto">
-            <VehicleSearch onVehicleFound={(v) => {
+            <VehicleSearch currentAgency={agency} onVehicleFound={(v) => {
               setSelectedVehicleId(null);
               setTimeout(() => setSelectedVehicleId(v.id), 50);
             }} />
