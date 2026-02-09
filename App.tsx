@@ -22,6 +22,9 @@ const DEFAULT_VIEW: { center: [number, number]; zoom: number; bounds?: L.LatLngB
   bounds: undefined
 };
 
+// Linjer som oftast saknar bearing data eller har fast riktning och därför visas som cirklar
+const NO_BEARING_LINES = ['7', '12', '21', '25', '26', '27', '28', '29', '30', '31'];
+
 const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   const R = 6371e3;
   const φ1 = lat1 * Math.PI/180;
@@ -48,18 +51,36 @@ const VehicleMarker: React.FC<VehicleMarkerProps> = ({ vehicle, lineShortName, i
   
   const icon = useMemo(() => {
     const color = vehicle.agency === 'WAAB' ? '#0891b2' : '#3B82F6';
+    const isNoBearing = NO_BEARING_LINES.includes(lineShortName);
+    
+    let markerHtml = '';
+    if (isNoBearing) {
+      markerHtml = `
+        <div style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; position: relative;">
+          <div style="width: 20px; height: 20px; background: ${color}; border: 3px solid white; border-radius: 50%; box-shadow: 0 2px 8px rgba(0,0,0,0.5);"></div>
+          <div style="position: absolute; top: -14px; left: 50%; transform: translateX(-50%); background: ${color}; color: white; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 800; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2);">
+            ${lineShortName}
+          </div>
+        </div>
+      `;
+    } else {
+      markerHtml = `
+        <div style="transform: rotate(${vehicle.bearing}deg); width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; position: relative;">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 100%; height: 100%; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));">
+            <path d="M12 2L4 21L12 17L20 21L12 2Z" fill="${color}" stroke="white" stroke-width="2" stroke-linejoin="round"/>
+          </svg>
+          <div style="position: absolute; top: -15px; left: 50%; transform: translateX(-50%) rotate(${-vehicle.bearing}deg); background: ${color}; color: white; padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: 800; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+            ${lineShortName}
+          </div>
+        </div>
+      `;
+    }
+
     return L.divIcon({
         className: 'custom-vehicle-icon',
-        html: `
-          <div style="transform: rotate(${vehicle.bearing}deg); width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; position: relative;">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 100%; height: 100%; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));">
-              <path d="M12 2L4 21L12 17L20 21L12 2Z" fill="${color}" stroke="white" stroke-width="2" stroke-linejoin="round"/>
-            </svg>
-            <div style="position: absolute; top: -15px; left: 50%; transform: translateX(-50%) rotate(${-vehicle.bearing}deg); background: ${color}; color: white; padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: 800; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
-              ${lineShortName}
-            </div>
-          </div>
-        `, iconSize: [34, 34], iconAnchor: [17, 17]
+        html: markerHtml,
+        iconSize: isNoBearing ? [40, 40] : [34, 34],
+        iconAnchor: isNoBearing ? [20, 20] : [17, 17]
       });
   }, [vehicle.bearing, lineShortName, vehicle.agency]);
 
@@ -145,7 +166,6 @@ const App: React.FC = () => {
     const passages = new Map<string, { time: string, stopped: boolean, duration?: string }>();
     
     activeRoute.stops.forEach(stop => {
-        // Vi letar efter punkter inom 100m för att vara säkra på att fånga passagen
         const anyNearbyPoints = history.filter(p => getDistance(p.lat, p.lng, stop.lat, stop.lng) < 100);
         
         if (anyNearbyPoints.length > 0) {
@@ -153,23 +173,18 @@ const App: React.FC = () => {
             const first = anyNearbyPoints[0];
             const arrivalTime = new Date(first.ts).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
             
-            // Kolla om bussen faktiskt stannade (måste ha punkter inom 35m)
             const strictPoints = anyNearbyPoints.filter(p => getDistance(p.lat, p.lng, stop.lat, stop.lng) < 35);
             let isActuallyStopped = false;
             let durationStr = "";
 
             if (strictPoints.length >= 2) {
                 const durationSec = Math.round((strictPoints[strictPoints.length - 1].ts - strictPoints[0].ts) / 1000);
-                // Ett stopp räknas om fordonet varit inom 35m i minst 4 sekunder (pga 5s intervall)
                 if (durationSec >= 4) {
                     isActuallyStopped = true;
                     const mins = Math.floor(durationSec / 60);
                     const secs = durationSec % 60;
                     durationStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
                 }
-            } else if (strictPoints.length === 1) {
-                // Specialfall: Om vi bara har en punkt exakt vid hållplatsen räknar vi det som passage (Gult)
-                isActuallyStopped = false;
             }
 
             passages.set(stop.id, {
@@ -250,7 +265,7 @@ const App: React.FC = () => {
                     <span className="text-xs text-slate-300">Visa all trafik</span>
                     <label className="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} className="sr-only peer" />
-                        <div className="w-8 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-600"></div>
+                        <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                     </label>
                 </div>
             </div>
@@ -271,8 +286,6 @@ const App: React.FC = () => {
         
         {activeRoute && activeRoute.stops.map(s => {
             const passage = stopPassages.get(s.id);
-            
-            // Hållplatserna är ALLTID vita om ingen historik (passage) hittas för valt fordon
             let markerFill = "#ffffff";
             if (passage) {
                 markerFill = passage.stopped ? "#10b981" : "#f59e0b";
@@ -280,9 +293,9 @@ const App: React.FC = () => {
             
             return (
                 <CircleMarker 
-                    key={`${s.id}-${markerFill}`} // VIKTIGT: Inkludera färgen i key för att tvinga Leaflet att uppdatera
+                    key={`${s.id}-${markerFill}`}
                     center={[s.lat, s.lng]} 
-                    radius={passage ? 8 : 6} // Gör pricken större om den har färg
+                    radius={passage ? 8 : 6}
                     fillColor={markerFill}
                     fillOpacity={1} 
                     color={agency === 'WAAB' ? "#0891b2" : "#3b82f6"} 
@@ -292,7 +305,7 @@ const App: React.FC = () => {
                     <Tooltip direction="top" offset={[0, -10]} opacity={0.9} className="custom-tooltip">
                         <div className="p-1 font-sans">
                             <div className="text-xs font-bold text-slate-900">{s.name}</div>
-                            {passage ? (
+                            {passage && (
                                 <div className="mt-1 flex flex-col gap-0.5">
                                     <div className={`flex items-center gap-1.5 text-[10px] font-bold ${passage.stopped ? 'text-emerald-600' : 'text-amber-600'}`}>
                                         <Clock className="w-3 h-3" />
@@ -305,10 +318,6 @@ const App: React.FC = () => {
                                         </div>
                                     )}
                                 </div>
-                            ) : selectedVehicleId ? (
-                                <div className="mt-1 text-[9px] text-slate-400 font-bold italic">Kommande hållplats</div>
-                            ) : (
-                                <div className="mt-1 text-[9px] text-slate-400 font-bold italic">Hållplats</div>
                             )}
                         </div>
                     </Tooltip>

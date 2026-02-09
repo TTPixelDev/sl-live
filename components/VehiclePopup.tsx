@@ -1,6 +1,6 @@
 import React from 'react';
 import { SLVehicle } from '../types';
-import { Building2, Hash, Gauge, Activity, Bus, Train, Ship, TramFront, TrainFront as SubwayIcon, Circle } from 'lucide-react';
+import { Building2, Hash, Gauge, Activity, Bus, Train, Ship, TramFront, TrainFront as SubwayIcon } from 'lucide-react';
 
 interface VehiclePopupProps {
   vehicle: SLVehicle;
@@ -16,18 +16,22 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
     if (/[a-zA-Z]/.test(lineName)) return { type: 'Buss', icon: Bus };
     const num = parseInt(lineName);
     if (isNaN(num)) return { type: 'Buss', icon: Bus };
+
+    // Tunnelbana
     if ([10, 11, 13, 14, 17, 18, 19].includes(num)) return { type: 'Tunnelbana', icon: SubwayIcon };
-    if ([7, 12, 30, 31, 21, 25, 26, 27, 28, 29].includes(num)) {
-      if (num === 7) return { type: 'Spårväg City', icon: Circle };
-      if (num === 12) return { type: 'Nockebybanan', icon: TramFront };
-      if (num === 21) return { type: 'Lidingöbanan', icon: Circle };
-      if ([30, 31].includes(num)) return { type: 'Tvärbanan', icon: Circle };
-      if ([25, 26].includes(num)) return { type: 'Saltsjöbanan', icon: Circle };
-      if ([27, 28, 29].includes(num)) return { type: 'Roslagsbanan', icon: Circle };
-      return { type: 'Spårvagn', icon: TramFront };
-    }
+
+    // Specifika banor med egna namn
+    if (num === 7) return { type: 'Spårväg City', icon: TramFront };
+    if (num === 12) return { type: 'Nockebybanan', icon: TramFront };
+    if (num === 21) return { type: 'Lidingöbanan', icon: TramFront };
+    if ([30, 31].includes(num)) return { type: 'Tvärbanan', icon: TramFront };
+    if ([25, 26].includes(num)) return { type: 'Saltsjöbanan', icon: Train };
+    if ([27, 28, 29].includes(num)) return { type: 'Roslagsbanan', icon: Train };
+
+    // Övriga generella kategorier
     if ([40, 41, 42, 43, 44, 48].includes(num)) return { type: 'Pendeltåg', icon: Train };
     if ([80, 82, 83, 84, 89].includes(num)) return { type: 'Pendelbåt', icon: Ship };
+
     return { type: 'Buss', icon: Bus };
   };
   
@@ -59,12 +63,12 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
   let company = "Okänd";
   switch (companyCode) {
     case "050": company = "Blidösundsbolaget"; break;
-    case "070": case "705": case "706": case "707": case "709": company = "AB Stockholms Spårvägar"; break;
+    case "070": case "151": case "152": case "700": case "701": case "702": case "705": case "706": case "707": case "709": company = "AB Stockholms Spårvägar"; break;
     case "100": company = "Keolis"; break;
     case "150": company = "VR Sverige"; break;
     case "251": company = "Connecting Stockholm"; break;
     case "300": company = "Nobina"; break;
-    case "450": case "456": case "459": company = "Transdev"; break;
+    case "450": case "451": case "452": case "456": case "459": company = "Transdev"; break;
     case "650": company = "SJ Stockholmståg"; break;
     case "750": company = "Djurgårdens färjetrafik"; break;
     case "800": company = "Ballerina"; break;
