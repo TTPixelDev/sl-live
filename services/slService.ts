@@ -10,7 +10,6 @@ const CACHE_DURATION = 1000 * 60 * 60 * 24 * 7;
 
 const RT_VEHICLE_URL = '/api/gtfs-rt';
 const RT_TRIP_UPDATES_URL = '/api/trip-updates';
-const RT_ALERTS_URL = '/api/service-alerts';
 
 export interface LineManifestEntry {
     id: string;
@@ -21,20 +20,12 @@ export interface LineManifestEntry {
     agency: 'SL' | 'WAAB';
 }
 
-export interface SLServiceAlert {
-    id: string;
-    header: string;
-    description: string;
-    affectedRoutes: string[];
-    affectedStops: string[];
-    severity?: string;
-}
-
 interface TripMapEntry {
   r: string; // route_id
   h?: string; // headsign
 }
 
+// Map: RouteID -> DirectionID -> Headsign
 interface RouteDirectionMap {
     [routeId: string]: {
         [directionId: string]: string;
@@ -178,89 +169,14 @@ class SLService {
     });
   }
 
-  private extractTranslation(obj: any): string {
-    if (!obj) return "";
-    if (typeof obj === 'string') return obj;
-
-    // Protobufjs toObject kan lägga listan under olika namn
-    const translations = obj.translation || obj.translations;
-    
-    if (Array.isArray(translations)) {
-        if (translations.length === 0) return "";
-        // 1. Försök hitta svenska
-        const sv = translations.find((t: any) => t.language?.toLowerCase().startsWith('sv'));
-        if (sv?.text) return sv.text;
-        
-        // 2. Försök hitta engelska
-        const en = translations.find((t: any) => t.language?.toLowerCase().startsWith('en'));
-        if (en?.text) return en.text;
-
-        // 3. Fallback till första tillgängliga text
-        return translations[0]?.text || "";
-    }
-
-    // Om det är ett objekt med en direkt 'text' egenskap
-    if (obj.text && typeof obj.text === 'string') return obj.text;
-
-    // Sista utväg: Sök igenom alla egenskaper efter något som ser ut som text
-    const values = Object.values(obj);
-    for (const val of values) {
-        if (typeof val === 'string' && val.length > 5) return val;
-        if (typeof val === 'object' && val !== null) {
-            const nested = this.extractTranslation(val);
-            if (nested) return nested;
-        }
-    }
-
-    return "";
-  }
-
-  async getServiceAlerts(): Promise<SLServiceAlert[]> {
-    try {
-        const res = await fetch(RT_ALERTS_URL);
-        if (!res.ok) return [];
-        
-        const buffer = await res.arrayBuffer();
-        if (buffer.byteLength === 0) return [];
-
-        const root = await this.getRTRoot();
-        const FeedMessage = root.lookupType("transit_realtime.FeedMessage");
-        const message = FeedMessage.decode(new Uint8Array(buffer));
-        const object = FeedMessage.toObject(message, { enums: String, longs: String });
-
-        return (object.entity || [])
-            .filter((e: any) => e.alert)
-            .map((e: any) => {
-                const a = e.alert;
-                // GTFS-RT standard: header_text = 10, description_text = 11
-                const headerText = this.extractTranslation(a.headerText || a.header_text);
-                const descText = this.extractTranslation(a.descriptionText || a.description_text);
-                
-                return {
-                    id: e.id,
-                    header: headerText || "Information saknas",
-                    description: descText || "",
-                    affectedRoutes: (a.informedEntity || a.informed_entity || []).map((ie: any) => String(ie.routeId || ie.route_id)).filter(Boolean),
-                    affectedStops: (a.informedEntity || a.informed_entity || []).map((ie: any) => String(ie.stopId || ie.stop_id)).filter(Boolean)
-                };
-            });
-    } catch (e) {
-        console.error("Fel vid hämtning av störningar:", e);
-        return [];
-    }
-  }
-
   async getLiveVehicles(currentAgency?: 'SL' | 'WAAB'): Promise<SLVehicle[]> {
     await this.initialize();
     try {
+        // Hämta både positioner och förseningar parallellt
         const [posRes, updatesRes] = await Promise.all([
           fetch(RT_VEHICLE_URL),
           fetch(RT_TRIP_UPDATES_URL)
         ]);
-
-        if (!posRes.ok || !updatesRes.ok) {
-            return [];
-        }
 
         const [posBuffer, updatesBuffer] = await Promise.all([
           posRes.arrayBuffer(),
@@ -276,6 +192,7 @@ class SLService {
         const updatesMessage = FeedMessage.decode(new Uint8Array(updatesBuffer));
         const updatesObject = FeedMessage.toObject(updatesMessage, { enums: String, longs: String });
 
+        // Mappa tripId -> delay, directionId, routeId och lastStopId
         const tripInfoMap: Map<string, { delay?: number, directionId?: number, routeId?: string, lastStopId?: string }> = new Map();
         
         (updatesObject.entity || []).forEach((e: any) => {
@@ -287,11 +204,15 @@ class SLService {
                     const delay = first.arrival?.delay !== undefined ? first.arrival.delay : 
                                  first.departure?.delay !== undefined ? first.departure.delay : undefined;
                     
+                    // Hämta lastStopId från sista uppdateringen
                     const last = stu[stu.length - 1];
                     const lastStopId = last?.stopId || last?.stop_id;
+                    
+                    // Hämta directionId och routeId från tripUpdate (gammal enkel logik)
                     const directionId = e.tripUpdate.trip.directionId ?? e.tripUpdate.trip.direction_id;
                     const routeId = e.tripUpdate.trip.routeId ?? e.tripUpdate.trip.route_id;
                     
+                    // Om vi har tripId, spara all information
                     if (tId) {
                         tripInfoMap.set(tId, { delay, directionId, routeId, lastStopId });
                     }
@@ -307,12 +228,14 @@ class SLService {
             const mapInfo = this.tripToRouteMap?.[tripId];
             if (!mapInfo) continue;
 
+            // Hämta info från tripInfoMap för att fylla i saknade värden (gammal enkel logik)
             const info = tripInfoMap.get(tripId);
 
             let routeId = mapInfo.r;
             if (!routeId && info?.routeId) routeId = info.routeId;
             let directionId = v.trip.directionId ?? v.trip.direction_id;
             
+            // Fyll i från tripInfo om det saknas
             if (info) {
                 if (directionId === undefined || directionId === null) directionId = info.directionId;
                 if (!routeId && info.routeId) routeId = info.routeId;
@@ -323,24 +246,43 @@ class SLService {
 
             if (currentAgency && routeManifest.agency !== currentAgency) continue;
 
+            // Använd sofistikerad destination-logik från gamla versionen
             let headsign = "Okänd";
+            let fallbackUsed = "none";
+            
+            // Försök med mapInfo.h först
             if (mapInfo.h) {
                 headsign = mapInfo.h;
+                fallbackUsed = "mapInfo.h";
             }
+            
+            // Fallback till routeDirections om det finns
             if ((!headsign || headsign === "Okänd") && directionId !== undefined && directionId !== null && this.routeDirections) {
                 const dirStr = String(directionId);
                 const fallbackHeadsign = this.routeDirections[routeId]?.[dirStr];
-                if (fallbackHeadsign) headsign = fallbackHeadsign;
+                if (fallbackHeadsign) {
+                    headsign = fallbackHeadsign;
+                    fallbackUsed = "routeDirections";
+                }
             }
+            
+            // Tredje fallback: använd lastStopId för att få hållplatsnamn
             if (!headsign || headsign === "Okänd") {
                 if (info?.lastStopId) {
                     const stopName = this.stopsMap.get(info.lastStopId);
-                    if (stopName) headsign = stopName;
+                    if (stopName) {
+                        headsign = stopName;
+                        fallbackUsed = "lastStopId";
+                    }
                 }
             }
+            
+            // Fjärde fallback: använd route manifest to/from som destination
             if (!headsign || headsign === "Okänd") {
+                // Använd "to" fältet från route manifest som destination
                 if (routeManifest.to && routeManifest.to !== routeManifest.from) {
                     headsign = routeManifest.to;
+                    fallbackUsed = "routeManifest.to";
                 }
             }
             
@@ -387,7 +329,7 @@ class SLService {
       package transit_realtime;
       message FeedMessage { required FeedHeader header = 1; repeated FeedEntity entity = 2; }
       message FeedHeader { required string gtfs_realtime_version = 1; optional uint64 timestamp = 3; }
-      message FeedEntity { required string id = 1; optional VehiclePosition vehicle = 4; optional TripUpdate trip_update = 3; optional Alert alert = 5; }
+      message FeedEntity { required string id = 1; optional VehiclePosition vehicle = 4; optional TripUpdate trip_update = 3; }
       message VehiclePosition { optional TripDescriptor trip = 1; optional VehicleDescriptor vehicle = 8; optional Position position = 2; }
       message TripUpdate { optional TripDescriptor trip = 1; repeated StopTimeUpdate stop_time_update = 2; }
       message StopTimeUpdate { optional uint32 stop_sequence = 1; optional string stop_id = 4; optional StopTimeEvent arrival = 2; optional StopTimeEvent departure = 3; }
@@ -395,16 +337,6 @@ class SLService {
       message TripDescriptor { optional string trip_id = 1; optional string route_id = 5; optional uint32 direction_id = 6; }
       message VehicleDescriptor { optional string id = 1; optional string label = 2; }
       message Position { required float latitude = 1; required float longitude = 2; optional float bearing = 3; optional float speed = 5; }
-      message Alert { 
-        repeated TimeRange active_period = 1; 
-        repeated EntitySelector informed_entity = 5; 
-        optional TranslatedString header_text = 10; 
-        optional TranslatedString description_text = 11;
-      }
-      message TimeRange { optional uint64 start = 1; optional uint64 end = 2; }
-      message EntitySelector { optional string route_id = 2; optional string stop_id = 5; }
-      message TranslatedString { repeated Translation translation = 1; }
-      message Translation { required string text = 1; optional string language = 2; }
     `).root;
     return this.rtRoot;
   }

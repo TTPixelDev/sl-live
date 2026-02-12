@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { SLVehicle } from '../types';
 import { Building2, Hash, Gauge, Activity, Bus, Train, Ship, TramFront, TrainFront as SubwayIcon } from 'lucide-react';
@@ -19,15 +18,22 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
     if (/[a-zA-Z]/.test(lineName)) return { type: 'Buss', icon: Bus };
     const num = parseInt(lineName);
     if (isNaN(num)) return { type: 'Buss', icon: Bus };
+
+    // Tunnelbana
     if ([10, 11, 13, 14, 17, 18, 19].includes(num)) return { type: 'Tunnelbana', icon: SubwayIcon };
+
+    // Specifika banor med egna namn
     if (num === 7) return { type: 'Spårväg City', icon: TramFront };
     if (num === 12) return { type: 'Nockebybanan', icon: TramFront };
     if (num === 21) return { type: 'Lidingöbanan', icon: TramFront };
     if ([30, 31].includes(num)) return { type: 'Tvärbanan', icon: TramFront };
     if ([25, 26].includes(num)) return { type: 'Saltsjöbanan', icon: Train };
     if ([27, 28, 29].includes(num)) return { type: 'Roslagsbanan', icon: Train };
+
+    // Övriga generella kategorier
     if ([40, 41, 42, 43, 44, 48].includes(num)) return { type: 'Pendeltåg', icon: Train };
     if ([80, 82, 83, 84, 89].includes(num)) return { type: 'Pendelbåt', icon: Ship };
+
     return { type: 'Buss', icon: Bus };
   };
   
@@ -72,8 +78,12 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
   }
 
   const isBoat = vehicle.agency === 'WAAB' || transportInfo.type === 'Pendelbåt' || transportInfo.type === 'Färja';
+  
+  // Bestäm visningsnamn för fordonet (Vagnsnr eller Fartygsnamn)
   let vehicleDisplayName = vehicle.vehicleNumber || vesselCode;
-  if (isBoat && SHIP_NAMES[vesselCode]) vehicleDisplayName = SHIP_NAMES[vesselCode];
+  if (isBoat && SHIP_NAMES[vesselCode]) {
+    vehicleDisplayName = SHIP_NAMES[vesselCode];
+  }
 
   const roundedSpeed = Math.round(vehicle.speed);
   const hasDestination = vehicle.destination && vehicle.destination !== "Okänd";
@@ -102,7 +112,7 @@ const VehiclePopup: React.FC<VehiclePopupProps> = ({ vehicle, lineShortName }) =
                     {vehicle.agency === 'WAAB' ? 'Fartyg' : transportInfo.type}
                 </div>
                 <div className="text-sm font-bold text-white truncate leading-tight">
-                    {hasDestination ? `mot ${vehicle.destination}` : `Linje ${lineShortName}`}
+                    {hasDestination && `mot ${vehicle.destination}`}
                 </div>
             </div>
         </div>

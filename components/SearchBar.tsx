@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Bus, MapPin, X, Train, Ship, TramFront, TrainFront, Clock, CheckCircle2, Map as MapIcon, XCircle, Timer, AlertTriangle } from 'lucide-react';
-import { slService, SLServiceAlert } from '../services/slService';
+import { Search, Bus, MapPin, X, Train, Ship, TramFront, TrainFront, Clock, CheckCircle2, Map as MapIcon, XCircle, Timer } from 'lucide-react';
+import { slService } from '../services/slService';
 import { SearchResult, SLLineRoute } from '../types';
 
 interface SearchBarProps {
@@ -13,7 +12,6 @@ interface SearchBarProps {
   placeholder?: string;
   currentAgency: 'SL' | 'WAAB';
   stopPassages?: Map<string, { time: string, stopped: boolean, duration?: string }>;
-  allAlerts?: SLServiceAlert[];
 }
 
 const getTransportIcon = (lineString: string, agency?: 'SL' | 'WAAB') => {
@@ -40,10 +38,10 @@ const getLineColorClass = (lineString: string, agency?: string) => {
   const redBusLines = ![10, 11, 13, 14, 17, 18, 19, 7, 12, 30, 31, 21, 25, 26, 27, 28, 29, 40, 41, 42, 43, 44, 48, 80, 82, 83, 84, 89].includes(num);
   if (!isNaN(num) && redBusLines) return 'bg-red-600';
   
-  if ([10, 11].includes(num)) return 'bg-blue-700'; 
-  if ([13, 14].includes(num)) return 'bg-red-600'; 
-  if ([17, 18, 19].includes(num)) return 'bg-green-600'; 
-  if ([40, 41, 42, 43, 44, 48].includes(num)) return 'bg-pink-500'; 
+  if ([10, 11].includes(num)) return 'bg-blue-700'; // Blå linje
+  if ([13, 14].includes(num)) return 'bg-red-600'; // Röd linje
+  if ([17, 18, 19].includes(num)) return 'bg-green-600'; // Grön linje
+  if ([40, 41, 42, 43, 44, 48].includes(num)) return 'bg-pink-500'; // Pendeltåg
   if (num === 7) return 'bg-gray-600';
   if (num === 12) return 'bg-slate-600';
   if (num === 21) return 'bg-amber-700';
@@ -63,8 +61,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
   onSearchChange,
   placeholder = "Sök linje eller hållplats...",
   currentAgency,
-  stopPassages,
-  allAlerts = []
+  stopPassages
 }) => {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -115,7 +112,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
   }, []);
 
   return (
-    <div ref={containerRef} className="flex flex-col gap-3 w-full">
+    <div ref={containerRef} className="absolute top-4 left-1/2 -translate-x-1/2 z-[2000] w-full max-w-md px-4 flex flex-col gap-3">
       <div className="relative bg-zinc-900/95 backdrop-blur-md rounded-2xl shadow-2xl border border-white/10 overflow-hidden">
         <div className="flex items-center px-4 py-3.5 gap-3">
           <Search className="w-5 h-5 text-zinc-400" />
@@ -144,7 +141,6 @@ const SearchBar: React.FC<SearchBarProps> = ({
           <div className="border-t border-white/5 max-h-[60vh] overflow-y-auto">
             {results.map((result) => {
               const passage = stopPassages?.get(result.id);
-              const hasAlert = result.type === 'line' && allAlerts.some(a => a.affectedRoutes.includes(result.id));
               const iconContainerColor = result.type === 'line' ? 'bg-blue-500/10' : 'bg-emerald-500/10';
               const TransportIcon = result.type === 'line' ? getTransportIcon(result.title, result.agency) : <MapPin className="w-5 h-5 text-emerald-500" />;
 
@@ -160,21 +156,14 @@ const SearchBar: React.FC<SearchBarProps> = ({
                   className="w-full flex items-center justify-between gap-4 px-4 py-3.5 hover:bg-white/5 transition-colors text-left border-b border-white/[0.02] last:border-0"
                 >
                   <div className="flex items-center gap-4 flex-1 min-w-0">
-                    <div className={`p-2.5 rounded-xl ${iconContainerColor} flex items-center justify-center relative`}>
+                    <div className={`p-2.5 rounded-xl ${iconContainerColor} flex items-center justify-center`}>
                       {result.type === 'line' ? 
-                        React.cloneElement(TransportIcon as React.ReactElement<any>, { className: 'w-5 h-5 text-blue-400' }) : 
+                        React.cloneElement(TransportIcon as React.ReactElement, { className: 'w-5 h-5 text-blue-400' }) : 
                         TransportIcon
                       }
-                      {hasAlert && (
-                        <div className="absolute -top-1.5 -right-1.5 bg-amber-500 rounded-full p-0.5 border-2 border-zinc-900 shadow-sm animate-pulse">
-                          <AlertTriangle className="w-2.5 h-2.5 text-white" />
-                        </div>
-                      )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-bold text-white truncate">
-                        {result.title}
-                      </div>
+                      <div className="text-sm font-bold text-white truncate">{result.title}</div>
                       <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">{result.subtitle}</div>
                     </div>
                   </div>
@@ -189,6 +178,9 @@ const SearchBar: React.FC<SearchBarProps> = ({
                                 <Timer className="w-2.5 h-2.5" />
                                 Stopptid: {passage.duration}
                             </div>
+                        )}
+                        {!passage.duration && !passage.stopped && (
+                            <XCircle className="w-3.5 h-3.5 text-amber-500 opacity-60" />
                         )}
                     </div>
                   )}
