@@ -255,10 +255,10 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Status-paneler i nederkant */}
-      <div className="absolute bottom-6 left-6 right-6 z-[1000] flex flex-col md:flex-row justify-between items-end gap-4 pointer-events-none">
+      {/* Status-paneler i nederkant - Responsivitet justerad till 'sm' brytpunkt */}
+      <div className="absolute bottom-6 left-6 right-6 z-[1000] flex flex-col sm:flex-row justify-between items-end gap-4 pointer-events-none">
         {/* Live Status (Vänster) */}
-        <div className="bg-slate-900/90 backdrop-blur-xl p-4 rounded-2xl shadow-2xl border border-white/10 pointer-events-auto w-full md:w-auto md:min-w-[280px]">
+        <div className="bg-slate-900/90 backdrop-blur-xl p-4 rounded-2xl shadow-2xl border border-white/10 pointer-events-auto w-full sm:w-auto sm:min-w-[280px]">
             <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-4 flex items-center justify-between border-b border-white/5 pb-2">
                 <div className="flex items-center gap-2">
                     <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" /> Live Status
@@ -286,7 +286,7 @@ const App: React.FC = () => {
         </div>
         
         {/* Fordonssökning + Agency Toggle (Höger) */}
-        <div className="pointer-events-auto w-full md:w-auto">
+        <div className="pointer-events-auto w-full sm:w-auto">
             <VehicleSearch 
               currentAgency={agency} 
               onAgencyChange={handleAgencyChange}
