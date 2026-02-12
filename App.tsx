@@ -242,7 +242,7 @@ const App: React.FC = () => {
     <div className="relative w-full h-full flex flex-col">
       {/* Centrerat sökfält i toppen */}
       <div className="absolute top-4 left-0 right-0 z-[3000] px-4 pointer-events-none flex justify-center">
-        <div className="w-full max-w-md pointer-events-auto">
+        <div className="w-full max-w-lg pointer-events-auto">
           <SearchBar 
             onSelect={handleSelect} 
             onClear={handleClear} 
@@ -258,7 +258,7 @@ const App: React.FC = () => {
       {/* Status-paneler i nederkant */}
       <div className="absolute bottom-6 left-6 right-6 z-[1000] flex flex-col md:flex-row justify-between items-end gap-4 pointer-events-none">
         {/* Live Status (Vänster) */}
-        <div className="bg-slate-900/95 backdrop-blur-xl p-5 rounded-2xl shadow-2xl border border-white/10 pointer-events-auto w-full md:w-auto md:min-w-[260px]">
+        <div className="bg-slate-900/90 backdrop-blur-xl p-4 rounded-2xl shadow-2xl border border-white/10 pointer-events-auto w-full md:w-auto md:min-w-[280px]">
             <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-4 flex items-center justify-between border-b border-white/5 pb-2">
                 <div className="flex items-center gap-2">
                     <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" /> Live Status
@@ -270,7 +270,7 @@ const App: React.FC = () => {
                     <span className="text-xs text-slate-300 font-bold">
                         {activeRoute ? `Fordon på linje ${activeRoute.line}` : 'Fordon i trafik'}
                     </span>
-                    <span className="text-xs text-white font-bold bg-slate-800 px-2.5 py-1 rounded border border-white/5">
+                    <span className="text-xs text-white font-bold bg-slate-800/50 px-2.5 py-1.5 rounded-xl border border-white/5 shadow-inner">
                         {activeRoute ? vehicles.filter(v => v.line === activeRoute.id).length : vehicles.length}
                     </span>
                 </div>
@@ -279,7 +279,7 @@ const App: React.FC = () => {
                     <span className="text-xs text-slate-300 font-bold">Visa all trafik</span>
                     <label className="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} className="sr-only peer" />
-                        <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        <div className="w-11 h-6 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600 border border-white/5 shadow-inner"></div>
                     </label>
                 </div>
             </div>
