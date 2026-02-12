@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Bus, MapPin, X, Train, Ship, TramFront, TrainFront, Clock, Timer } from 'lucide-react';
+import { Search, Bus, MapPin, X, Train, Ship, TramFront, TrainFront, Clock, Timer, Building2 } from 'lucide-react';
 import { slService } from '../services/slService';
 import { SearchResult, SLLineRoute } from '../types';
 
@@ -13,6 +13,7 @@ interface SearchBarProps {
   placeholder?: string;
   currentAgency: 'SL' | 'WAAB';
   stopPassages?: Map<string, { time: string, stopped: boolean, duration?: string }>;
+  operatorName?: string | null;
 }
 
 const getTransportIcon = (lineString: string, agency?: 'SL' | 'WAAB') => {
@@ -58,7 +59,8 @@ const SearchBar: React.FC<SearchBarProps> = ({
   onSearchChange,
   placeholder = "Sök linje eller hållplats...",
   currentAgency,
-  stopPassages
+  stopPassages,
+  operatorName
 }) => {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -181,8 +183,15 @@ const SearchBar: React.FC<SearchBarProps> = ({
                 <div className="shrink-0 flex items-center justify-center">
                     {getTransportIcon(activeRoute.line, activeRoute.agency)}
                 </div>
-                <div className="flex flex-col min-w-0">
-                  <span className="text-[10px] text-white/70 font-bold uppercase tracking-widest">Aktiv Linje</span>
+                <div className="flex flex-col min-w-0 w-full">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-white/70 font-bold uppercase tracking-widest">Aktiv Linje</span>
+                    {operatorName && (
+                        <span className="text-[10px] text-white/70 font-bold uppercase tracking-widest flex items-center gap-1">
+                             {operatorName}
+                        </span>
+                    )}
+                  </div>
                   <span className="text-sm font-bold text-white truncate">
                       {activeRoute.line}: {activeRoute.stops[0].name} – {activeRoute.stops[activeRoute.stops.length-1].name}
                   </span>

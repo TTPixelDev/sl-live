@@ -38,6 +38,25 @@ const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => 
   return R * c;
 };
 
+const getOperatorFromVehicleId = (id: string, agency: 'SL' | 'WAAB' | undefined) => {
+    if (agency === 'WAAB') return "Blidösundsbolaget";
+    const match = /([0-9]{3})([0-9]{4})$/.exec(id);
+    const companyCode = match ? match[1] : null;
+    switch (companyCode) {
+        case "050": return "Blidösundsbolaget";
+        case "070": case "151": case "152": case "700": case "701": case "702": case "705": case "706": case "707": case "709": return "AB Stockholms Spårvägar";
+        case "100": return "Keolis";
+        case "150": return "VR Sverige";
+        case "250": case "251": case "252": return "Connecting Stockholm";
+        case "300": return "Nobina";
+        case "450": case "451": case "452": case "456": case "459": return "Transdev";
+        case "650": return "SJ Stockholmståg";
+        case "750": return "Djurgårdens färjetrafik";
+        case "800": return "Ballerina";
+        default: return "SL";
+    }
+};
+
 interface VehicleMarkerProps {
   vehicle: SLVehicle;
   lineShortName: string;
@@ -201,6 +220,18 @@ const App: React.FC = () => {
     return passages;
   }, [activeRoute, history]);
 
+  const activeLineOperator = useMemo(() => {
+    if (!activeRoute) return null;
+    if (activeRoute.agency === 'WAAB') return "Blidösundsbolaget";
+    
+    // Hitta första fordonet på denna linje för att identifiera entreprenör
+    const vehicleOnLine = vehicles.find(v => v.line === activeRoute.id);
+    if (vehicleOnLine) {
+        return getOperatorFromVehicleId(vehicleOnLine.id, activeRoute.agency);
+    }
+    return "SL"; // Fallback om inga fordon syns
+  }, [activeRoute, vehicles]);
+
   const handleClear = () => { 
     setActiveRoute(null); 
     setActiveStop(null); 
@@ -251,6 +282,7 @@ const App: React.FC = () => {
             onSearchChange={setSearchQuery} 
             currentAgency={agency} 
             stopPassages={stopPassages}
+            operatorName={activeLineOperator}
           />
         </div>
       </div>
