@@ -241,7 +241,7 @@ const App: React.FC = () => {
     if (vehicleOnLine) {
         return getOperatorFromVehicleId(vehicleOnLine.id, activeRoute.agency);
     }
-    return "SL"; // Fallback om inga fordon syns
+    return "Inga fordon i trafik"; // Fallback ändrad från "SL"
   }, [activeRoute, vehicles]);
 
   const handleClear = () => { 
