@@ -17,9 +17,21 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-const DEFAULT_VIEW: { center: [number, number]; zoom: number; bounds?: L.LatLngBoundsExpression } = {
+interface MapView {
+  center: [number, number];
+  zoom: number;
+  bounds?: L.LatLngBoundsExpression;
+}
+
+const SL_DEFAULT_VIEW: MapView = {
   center: [59.3293, 18.0686],
   zoom: 12,
+  bounds: undefined
+};
+
+const WAAB_DEFAULT_VIEW: MapView = {
+  center: [59.35, 18.65], // Panorerat mer mot skärgården (mellan Vaxholm, Möja och Sandhamn)
+  zoom: 10,
   bounds: undefined
 };
 
@@ -143,7 +155,7 @@ const App: React.FC = () => {
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [activeRoute, setActiveRoute] = useState<SLLineRoute | null>(null);
   const [activeStop, setActiveStop] = useState<SLStop | null>(null);
-  const [mapConfig, setMapConfig] = useState(DEFAULT_VIEW);
+  const [mapConfig, setMapConfig] = useState<MapView>(SL_DEFAULT_VIEW);
   const [routeManifest, setRouteManifest] = useState<Map<string, LineManifestEntry>>(new Map());
   const [searchQuery, setSearchQuery] = useState('');
   const [showAll, setShowAll] = useState(false);
@@ -237,7 +249,8 @@ const App: React.FC = () => {
     setActiveStop(null); 
     setSelectedVehicleId(null); 
     setHistory([]);
-    setMapConfig(DEFAULT_VIEW); 
+    // Återgå till standardvyn för det aktuella trafikslaget
+    setMapConfig(agency === 'WAAB' ? WAAB_DEFAULT_VIEW : SL_DEFAULT_VIEW); 
     setSearchQuery(''); 
   };
 
@@ -264,7 +277,14 @@ const App: React.FC = () => {
 
   const handleAgencyChange = (newAgency: 'SL' | 'WAAB') => {
     setAgency(newAgency);
-    handleClear();
+    // Återställ allt och flytta kartan till det nya trafikslagets standardvy
+    const view = newAgency === 'WAAB' ? WAAB_DEFAULT_VIEW : SL_DEFAULT_VIEW;
+    setActiveRoute(null); 
+    setActiveStop(null); 
+    setSelectedVehicleId(null); 
+    setHistory([]);
+    setMapConfig(view); 
+    setSearchQuery(''); 
   };
 
   if (loading) return <div className="h-full flex flex-col items-center justify-center bg-slate-900 text-white"><RefreshCw className="w-12 h-12 animate-spin text-blue-500 mb-4" />Laddar trafikdata...</div>;

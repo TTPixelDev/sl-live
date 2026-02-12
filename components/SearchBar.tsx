@@ -107,6 +107,17 @@ const SearchBar: React.FC<SearchBarProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && results.length > 0 && showDropdown) {
+      e.preventDefault();
+      const topResult = results[0];
+      isSelectingRef.current = true;
+      onSelect(topResult);
+      setShowDropdown(false);
+      onSearchChange('');
+    }
+  };
+
   return (
     <div ref={containerRef} className="flex flex-col gap-3 w-full">
       <div className="relative bg-slate-900/90 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/10 overflow-hidden">
@@ -123,6 +134,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
                 onSearchChange(e.target.value);
               }}
               onFocus={() => { if (searchQuery.length > 0) setShowDropdown(true); }}
+              onKeyDown={handleKeyDown}
             />
             {searchQuery && (
               <button onClick={() => { onSearchChange(''); }} className="p-1 hover:bg-slate-700 rounded-full transition-colors">

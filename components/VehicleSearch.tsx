@@ -20,6 +20,13 @@ const VehicleSearch: React.FC<VehicleSearchProps> = ({ onVehicleFound, currentAg
 
   const isWAAB = currentAgency === 'WAAB';
 
+  // Töm fältet om man byter mellan SL och WÅAB
+  useEffect(() => {
+    setQuery('');
+    setError(null);
+    setShowSuggestions(false);
+  }, [currentAgency]);
+
   const suggestions = useMemo(() => {
     if (!isWAAB || query.length < 1) return [];
     const q = query.toLowerCase();
@@ -44,18 +51,18 @@ const VehicleSearch: React.FC<VehicleSearchProps> = ({ onVehicleFound, currentAg
     setLoading(true);
     setError(null);
     setShowSuggestions(false);
+    setQuery(''); // Tömmer alltid fältet vid sökning
 
     try {
       const result = await slService.findVehicle(searchVal);
       if (result) {
         onVehicleFound(result.vehicle, result.routeId);
-        setQuery('');
       } else {
-        setError(isWAAB ? 'Fartyget ej i trafik' : 'Vagn ej i trafik');
-        setTimeout(() => setError(null), 3000);
+        setError(isWAAB ? 'Fartyg ej i trafik' : 'Vagn ej i trafik');
+        setTimeout(() => setError(null), 4000);
       }
     } catch (err) {
-      setError('Kunde inte söka');
+      setError('Sökfel');
       setTimeout(() => setError(null), 3000);
     } finally {
       setLoading(false);
@@ -69,14 +76,14 @@ const VehicleSearch: React.FC<VehicleSearchProps> = ({ onVehicleFound, currentAg
   };
 
   return (
-    <div ref={containerRef} className="relative bg-slate-900/90 backdrop-blur-xl border border-white/10 p-3 rounded-2xl shadow-2xl flex flex-col gap-3 w-full md:w-auto md:min-w-[280px]">
+    <div ref={containerRef} className="relative bg-slate-900/90 backdrop-blur-xl border border-white/10 p-3 rounded-2xl shadow-2xl flex flex-col gap-3 w-full sm:w-auto sm:min-w-[280px]">
       {/* Integrerad SL/WÅAB-toggle */}
       <div className="bg-slate-800/50 p-1 rounded-xl flex border border-white/5">
         <button 
           onClick={() => onAgencyChange('SL')} 
           className={`flex-1 px-4 py-1.5 rounded-lg text-[11px] font-bold transition-all ${currentAgency === 'SL' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
         >
-          SL TRAFIK
+          SL
         </button>
         <button 
           onClick={() => onAgencyChange('WAAB')} 
@@ -94,16 +101,25 @@ const VehicleSearch: React.FC<VehicleSearchProps> = ({ onVehicleFound, currentAg
               onChange={(e) => {
                 setQuery(e.target.value);
                 setShowSuggestions(true);
+                if (error) setError(null); // Ta bort felmeddelande om man börjar skriva nytt
               }}
               onFocus={() => setShowSuggestions(true)}
-              placeholder={isWAAB ? "Sök fartyg eller nr..." : "Vagnsnr..."}
+              placeholder={isWAAB ? "Fartyg..." : "Vagnsnr..."}
               className="w-full bg-slate-800/50 text-white placeholder-slate-500 text-sm rounded-xl px-3 py-2.5 pr-8 outline-none focus:bg-slate-800 transition-colors border border-transparent focus:border-blue-500/30"
             />
+            
+            {/* Felmeddelande inuti inputfältet till höger */}
+            {error && !query && (
+                <div className="absolute right-9 top-1/2 -translate-y-1/2 pointer-events-none text-[10px] font-bold text-red-400/90 whitespace-nowrap animate-in fade-in slide-in-from-right-1">
+                    {error}
+                </div>
+            )}
+
             <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
               {isWAAB ? (
-                <Ship className="w-3.5 h-3.5 text-cyan-500" />
+                <Ship className="w-3.5 h-3.5 text-cyan-500 opacity-70" />
               ) : (
-                <Hash className="w-3.5 h-3.5 text-slate-500" />
+                <Hash className="w-3.5 h-3.5 text-slate-500 opacity-70" />
               )}
             </div>
         </div>
@@ -124,7 +140,6 @@ const VehicleSearch: React.FC<VehicleSearchProps> = ({ onVehicleFound, currentAg
             <button
               key={code}
               onClick={() => {
-                setQuery(name);
                 performSearch(code);
               }}
               className="w-full px-4 py-3 text-left text-sm text-white hover:bg-white/5 transition-colors flex items-center justify-between group"
@@ -137,12 +152,6 @@ const VehicleSearch: React.FC<VehicleSearchProps> = ({ onVehicleFound, currentAg
             </button>
           ))}
         </div>
-      )}
-
-      {error && (
-          <div className="text-[11px] font-bold text-red-400 text-center animate-in fade-in slide-in-from-top-1">
-              {error}
-          </div>
       )}
     </div>
   );
