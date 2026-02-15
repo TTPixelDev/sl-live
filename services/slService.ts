@@ -40,6 +40,7 @@ class SLService {
   private routeDirections: RouteDirectionMap | null = null;
   private stopsMap: Map<string, string> = new Map();
   private manifest: LineManifestEntry[] = [];
+  private contractorMap: Map<string, string> = new Map();
 
   public areKeysConfigured(): boolean { return true; }
 
@@ -70,12 +71,38 @@ class SLService {
       this.manifest = await this.getManifestFromDB();
     }
     await this.loadHelperMaps();
+    await this.loadContractors();
     this.isInitialized = true;
   }
 
   async getManifest(): Promise<LineManifestEntry[]> {
     await this.initialize();
     return this.manifest;
+  }
+
+  private async loadContractors() {
+    try {
+        const res = await fetch('/api/contractors');
+        if (res.ok) {
+            const data = await res.json();
+            // Data innehåller arrayer för 'bus', 'metro', etc.
+            Object.values(data).forEach((modeList: any) => {
+                if (Array.isArray(modeList)) {
+                    modeList.forEach((line: any) => {
+                        if (line.gid && line.contractor?.name) {
+                            this.contractorMap.set(line.gid.toString(), line.contractor.name);
+                        }
+                    });
+                }
+            });
+        }
+    } catch (e) { 
+        console.warn("Kunde inte ladda entreprenörsdata:", e); 
+    }
+  }
+
+  public getContractor(routeId: string): string | undefined {
+      return this.contractorMap.get(routeId);
   }
 
   private async loadHelperMaps() {
