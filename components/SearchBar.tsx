@@ -7,7 +7,7 @@ import { SearchResult, SLLineRoute } from '../types';
 interface SearchBarProps {
   onSelect: (result: SearchResult) => void;
   onClear: () => void;
-  activeRoute: SLLineRoute | null;
+  activeRoute: SLLineRoute | null; // Finns kvar i interfacet men används inte visuellt i komponenten längre
   searchQuery: string;
   onSearchChange: (query: string) => void;
   placeholder?: string;
@@ -27,28 +27,6 @@ const getTransportIcon = (lineString: string, agency?: 'SL' | 'WAAB') => {
   if ([40, 41, 42, 43, 44, 48].includes(num)) return <Train className="w-5 h-5 text-white" />;
   if ([80, 82, 83, 84, 89].includes(num)) return <Ship className="w-5 h-5 text-white" />;
   return <Bus className="w-5 h-5 text-white" />;
-};
-
-const getLineColorClass = (lineString: string, agency?: string) => {
-  if (agency === 'WAAB') return 'bg-cyan-600';
-  const lineName = lineString.replace('Linje ', '').trim();
-  const num = parseInt(lineName);
-  const blueBusLines = [1, 2, 3, 4, 5, 6, 172, 173, 176, 177, 178, 179, 471, 474, 670, 676, 677, 873, 875];
-  if (!isNaN(num) && blueBusLines.includes(num)) return 'bg-blue-600';
-  const redBusLines = ![10, 11, 13, 14, 17, 18, 19, 7, 12, 30, 31, 21, 25, 26, 27, 28, 29, 40, 41, 42, 43, 44, 48, 80, 82, 83, 84, 89].includes(num);
-  if (!isNaN(num) && redBusLines) return 'bg-red-600';
-  if ([10, 11].includes(num)) return 'bg-blue-700'; 
-  if ([13, 14].includes(num)) return 'bg-red-600'; 
-  if ([17, 18, 19].includes(num)) return 'bg-green-600'; 
-  if ([40, 41, 42, 43, 44, 48].includes(num)) return 'bg-pink-500'; 
-  if (num === 7) return 'bg-gray-600';
-  if (num === 12) return 'bg-slate-600';
-  if (num === 21) return 'bg-amber-700';
-  if ([30, 31].includes(num)) return 'bg-orange-600';
-  if ([25, 26].includes(num)) return 'bg-teal-600';
-  if ([27, 28, 29].includes(num)) return 'bg-purple-600';
-  if ([80, 82, 83, 84, 89].includes(num)) return 'bg-cyan-600';
-  return 'bg-blue-600';
 };
 
 const SearchBar: React.FC<SearchBarProps> = ({ 
@@ -72,22 +50,9 @@ const SearchBar: React.FC<SearchBarProps> = ({
       const q = searchQuery.trim();
       if (q.length > 0) {
         const globalResults = await slService.search(q, currentAgency);
-        const lineResults = globalResults.filter(r => r.type === 'line');
-        if (activeRoute) {
-            const filteredStops = activeRoute.stops
-                .filter(s => s.name.toLowerCase().includes(q.toLowerCase()))
-                .slice(0, 10)
-                .map(s => ({
-                    type: 'stop' as const,
-                    id: s.id,
-                    title: s.name,
-                    subtitle: `På linje ${activeRoute.line}`,
-                    agency: activeRoute.agency
-                }));
-            setResults([...lineResults, ...filteredStops]);
-        } else {
-            setResults(globalResults);
-        }
+        // Filtrera bort linjer som redan är valda om activeRoute används? 
+        // För enkelhetens skull visar vi alla resultat så användaren ser vad som matchar.
+        setResults(globalResults);
         if (!isSelectingRef.current) setShowDropdown(true);
       } else {
         setResults([]);
@@ -95,7 +60,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
       }
     };
     fetchResults();
-  }, [searchQuery, currentAgency, activeRoute]);
+  }, [searchQuery, currentAgency]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -127,7 +92,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
             <input
               type="text"
               className="flex-1 bg-transparent text-white outline-none placeholder:text-slate-500 text-sm font-medium"
-              placeholder={activeRoute ? `Sök på linje ${activeRoute.line}...` : placeholder}
+              placeholder={placeholder}
               value={searchQuery}
               onChange={(e) => {
                 isSelectingRef.current = false;
@@ -188,35 +153,6 @@ const SearchBar: React.FC<SearchBarProps> = ({
           </div>
         )}
       </div>
-
-      {activeRoute && !searchQuery && (
-        <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
-            <div className={`flex-1 ${getLineColorClass(activeRoute.line, activeRoute.agency)} shadow-xl rounded-2xl px-5 py-3 flex items-center gap-4 border border-white/20`}>
-                <div className="shrink-0 flex items-center justify-center">
-                    {getTransportIcon(activeRoute.line, activeRoute.agency)}
-                </div>
-                <div className="flex flex-col min-w-0 w-full">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-white/70 font-bold uppercase tracking-widest">Aktiv Linje</span>
-                    {operatorName && (
-                        <span className="text-[10px] text-white/70 font-bold uppercase tracking-widest flex items-center gap-1">
-                             {operatorName}
-                        </span>
-                    )}
-                  </div>
-                  <span className="text-sm font-bold text-white truncate">
-                      {activeRoute.line}: {activeRoute.stops[0].name} – {activeRoute.stops[activeRoute.stops.length-1].name}
-                  </span>
-                </div>
-            </div>
-            <button 
-                onClick={onClear}
-                className="bg-slate-900/90 backdrop-blur-xl hover:bg-slate-800 text-white p-4 rounded-2xl shadow-2xl transition-all active:scale-95 border border-white/10 shrink-0"
-            >
-                <X className="w-5 h-5" />
-            </button>
-        </div>
-      )}
     </div>
   );
 };

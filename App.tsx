@@ -7,7 +7,7 @@ import VehiclePopup from './components/VehiclePopup';
 import VehicleSearch from './components/VehicleSearch';
 import { slService, LineManifestEntry } from './services/slService';
 import { SLVehicle, SLLineRoute, SearchResult, SLStop, HistoryPoint } from './types';
-import { RefreshCw, Clock, Timer } from 'lucide-react';
+import { RefreshCw, Clock, Timer, X, Train, Ship, TramFront, Bus, Trash2, Building2 } from 'lucide-react';
 
 // Fix för Leaflet ikoner
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -50,6 +50,34 @@ const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => 
   return R * c;
 };
 
+// Hjälpfunktion för att hämta färg baserat på linjenummer (samma logik som i SearchBar/Popup)
+const getLineColor = (lineString: string, agency?: string) => {
+    if (agency === 'WAAB') return '#0891b2'; // Cyan
+    const lineName = lineString.replace('Linje ', '').trim();
+    const num = parseInt(lineName);
+    const blueBusLines = [1, 2, 3, 4, 5, 6, 172, 173, 176, 177, 178, 179, 471, 474, 670, 676, 677, 873, 875];
+    
+    if (!isNaN(num)) {
+        if (blueBusLines.includes(num)) return '#2563eb'; // Blue-600
+        if ([10, 11].includes(num)) return '#1d4ed8'; // Blue-700 (TB Blå)
+        if ([13, 14].includes(num)) return '#dc2626'; // Red-600 (TB Röd)
+        if ([17, 18, 19].includes(num)) return '#16a34a'; // Green-600 (TB Grön)
+        if ([40, 41, 42, 43, 44, 48].includes(num)) return '#ec4899'; // Pink-500 (Pendel)
+        if (num === 7) return '#4b5563'; // Gray-600 (Spårväg City)
+        if (num === 12) return '#475569'; // Slate-600 (Nockeby)
+        if (num === 21) return '#b45309'; // Amber-700 (Lidingö)
+        if ([30, 31].includes(num)) return '#ea580c'; // Orange-600 (Tvärbanan)
+        if ([25, 26].includes(num)) return '#0d9488'; // Teal-600 (Saltsjö)
+        if ([27, 28, 29].includes(num)) return '#9333ea'; // Purple-600 (Roslags)
+        if ([80, 82, 83, 84, 89].includes(num)) return '#0891b2'; // Cyan-600 (Båt)
+        
+        // Standard röd buss
+        const isRedBus = ![10, 11, 13, 14, 17, 18, 19, 7, 12, 30, 31, 21, 25, 26, 27, 28, 29, 40, 41, 42, 43, 44, 48, 80, 82, 83, 84, 89].includes(num);
+        if (isRedBus) return '#dc2626'; 
+    }
+    return '#2563eb'; // Default Blue
+};
+
 interface VehicleMarkerProps {
   vehicle: SLVehicle;
   lineShortName: string;
@@ -62,7 +90,8 @@ const VehicleMarker: React.FC<VehicleMarkerProps> = ({ vehicle, lineShortName, i
   const markerRef = useRef<L.Marker>(null);
   
   const icon = useMemo(() => {
-    const color = vehicle.agency === 'WAAB' ? '#0891b2' : '#3B82F6';
+    // Använd lineShortName (t.ex. "40") istället för vehicle.line (routeId) för att få rätt färg
+    const color = getLineColor(lineShortName, vehicle.agency);
     const isNoBearing = NO_BEARING_LINES.includes(lineShortName);
     
     let markerHtml = '';
@@ -94,7 +123,7 @@ const VehicleMarker: React.FC<VehicleMarkerProps> = ({ vehicle, lineShortName, i
         iconSize: isNoBearing ? [40, 40] : [34, 34],
         iconAnchor: isNoBearing ? [20, 20] : [17, 17]
       });
-  }, [vehicle.bearing, lineShortName, vehicle.agency]);
+  }, [vehicle.bearing, lineShortName, vehicle.agency]); // Tog bort vehicle.line som dependency då vi använder lineShortName
 
   useEffect(() => {
     if (markerRef.current) {
@@ -134,7 +163,9 @@ const App: React.FC = () => {
   const [agency, setAgency] = useState<'SL' | 'WAAB'>('SL');
   const [vehicles, setVehicles] = useState<SLVehicle[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
-  const [activeRoute, setActiveRoute] = useState<SLLineRoute | null>(null);
+  
+  const [selectedRoutes, setSelectedRoutes] = useState<SLLineRoute[]>([]);
+  
   const [activeStop, setActiveStop] = useState<SLStop | null>(null);
   const [mapConfig, setMapConfig] = useState<MapView>(SL_DEFAULT_VIEW);
   const [routeManifest, setRouteManifest] = useState<Map<string, LineManifestEntry>>(new Map());
@@ -167,86 +198,105 @@ const App: React.FC = () => {
         const v = vehicles.find(x => x.id === selectedVehicleId);
         if (v) {
             slService.getVehicleHistory(v.tripId).then(setHistory);
-            slService.getLineRoute(v.line).then(r => {
-                if (r) setActiveRoute(r);
-            });
+            
+            if (!selectedRoutes.some(r => r.id === v.line)) {
+                slService.getLineRoute(v.line).then(r => {
+                    if (r) setSelectedRoutes(prev => [...prev, r]);
+                });
+            }
         }
     } else {
         setHistory([]);
     }
-  }, [selectedVehicleId, vehicles]);
+  }, [selectedVehicleId, vehicles]); 
 
   const stopPassages = useMemo(() => {
-    if (!activeRoute || history.length === 0) return new Map();
+    if (selectedRoutes.length === 0 || history.length === 0) return new Map();
     const passages = new Map<string, { time: string, stopped: boolean, duration?: string }>();
     
-    activeRoute.stops.forEach(stop => {
-        const anyNearbyPoints = history.filter(p => getDistance(p.lat, p.lng, stop.lat, stop.lng) < 100);
-        
-        if (anyNearbyPoints.length > 0) {
-            anyNearbyPoints.sort((a, b) => a.ts - b.ts);
-            const first = anyNearbyPoints[0];
-            const arrivalTime = new Date(first.ts).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+    selectedRoutes.forEach(route => {
+        route.stops.forEach(stop => {
+            const anyNearbyPoints = history.filter(p => getDistance(p.lat, p.lng, stop.lat, stop.lng) < 100);
             
-            const strictPoints = anyNearbyPoints.filter(p => getDistance(p.lat, p.lng, stop.lat, stop.lng) < 35);
-            let isActuallyStopped = false;
-            let durationStr = "";
+            if (anyNearbyPoints.length > 0) {
+                anyNearbyPoints.sort((a, b) => a.ts - b.ts);
+                const first = anyNearbyPoints[0];
+                const arrivalTime = new Date(first.ts).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+                
+                const strictPoints = anyNearbyPoints.filter(p => getDistance(p.lat, p.lng, stop.lat, stop.lng) < 35);
+                let isActuallyStopped = false;
+                let durationStr = "";
 
-            if (strictPoints.length >= 2) {
-                const durationSec = Math.round((strictPoints[strictPoints.length - 1].ts - strictPoints[0].ts) / 1000);
-                if (durationSec > 10) {
-                    isActuallyStopped = true;
-                    const mins = Math.floor(durationSec / 60);
-                    const secs = durationSec % 60;
-                    durationStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+                if (strictPoints.length >= 2) {
+                    const durationSec = Math.round((strictPoints[strictPoints.length - 1].ts - strictPoints[0].ts) / 1000);
+                    if (durationSec > 10) {
+                        isActuallyStopped = true;
+                        const mins = Math.floor(durationSec / 60);
+                        const secs = durationSec % 60;
+                        durationStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+                    }
                 }
-            }
 
-            passages.set(stop.id, {
-                time: arrivalTime,
-                stopped: isActuallyStopped,
-                duration: durationStr
-            });
-        }
+                passages.set(stop.id, {
+                    time: arrivalTime,
+                    stopped: isActuallyStopped,
+                    duration: durationStr
+                });
+            }
+        });
     });
     
     return passages;
-  }, [activeRoute, history]);
-
-  const activeLineOperator = useMemo(() => {
-    if (!activeRoute) return null;
-    if (activeRoute.agency === 'WAAB') return "Blidösundsbolaget";
-    
-    // Försök hämta entreprenör från den statiska datan via API:et
-    const staticOperator = slService.getContractor(activeRoute.id);
-    if (staticOperator) return staticOperator;
-
-    return "Information saknas";
-  }, [activeRoute]);
+  }, [selectedRoutes, history]);
 
   const handleClear = () => { 
-    setActiveRoute(null); 
+    setSelectedRoutes([]); 
     setActiveStop(null); 
     setSelectedVehicleId(null); 
     setHistory([]);
-    // Återgå till standardvyn för det aktuella trafikslaget
     setMapConfig(agency === 'WAAB' ? WAAB_DEFAULT_VIEW : SL_DEFAULT_VIEW); 
     setSearchQuery(''); 
   };
 
+  const handleRemoveRoute = (routeId: string) => {
+      const newRoutes = selectedRoutes.filter(r => r.id !== routeId);
+      setSelectedRoutes(newRoutes);
+      
+      if (newRoutes.length === 0) {
+          handleClear();
+      } else {
+          const allPoints = newRoutes.flatMap(r => r.path);
+          if (allPoints.length > 0) {
+              const b = L.latLngBounds(allPoints);
+              setMapConfig(prev => ({ ...prev, bounds: b }));
+          }
+      }
+  };
+
   const handleSelect = async (res: SearchResult) => {
-    setSelectedVehicleId(null);
-    setHistory([]);
-    
     if (res.type === 'line') {
+        setSelectedVehicleId(null);
+        setHistory([]);
+        
+        if (selectedRoutes.some(r => r.id === res.id)) {
+            return;
+        }
+
         const r = await slService.getLineRoute(res.id);
         if (r) { 
-            setActiveRoute(r); 
+            const newRoutes = [...selectedRoutes, r];
+            setSelectedRoutes(newRoutes); 
             setActiveStop(null); 
-            const b = L.latLngBounds(r.path); 
+            
+            const allPoints = newRoutes.flatMap(route => route.path);
+            const b = L.latLngBounds(allPoints); 
             setMapConfig({ center: [b.getCenter().lat, b.getCenter().lng], zoom: 12, bounds: b }); 
         }
     } else {
+        setSelectedVehicleId(null);
+        setHistory([]);
+        setSelectedRoutes([]);
+
         const s = await slService.getStopInfo(res.id);
         if (s) { 
             setActiveStop(s); 
@@ -257,9 +307,8 @@ const App: React.FC = () => {
 
   const handleAgencyChange = (newAgency: 'SL' | 'WAAB') => {
     setAgency(newAgency);
-    // Återställ allt och flytta kartan till det nya trafikslagets standardvy
     const view = newAgency === 'WAAB' ? WAAB_DEFAULT_VIEW : SL_DEFAULT_VIEW;
-    setActiveRoute(null); 
+    setSelectedRoutes([]); 
     setActiveStop(null); 
     setSelectedVehicleId(null); 
     setHistory([]);
@@ -272,22 +321,68 @@ const App: React.FC = () => {
   return (
     <div className="relative w-full h-full flex flex-col">
       {/* Centrerat sökfält i toppen */}
-      <div className="absolute top-4 left-0 right-0 z-[3000] px-4 pointer-events-none flex justify-center">
+      <div className="absolute top-4 left-0 right-0 z-[3000] px-4 pointer-events-none flex flex-col items-center gap-2">
         <div className="w-full max-w-lg pointer-events-auto">
           <SearchBar 
             onSelect={handleSelect} 
             onClear={handleClear} 
-            activeRoute={activeRoute} 
+            activeRoute={null}
             searchQuery={searchQuery} 
             onSearchChange={setSearchQuery} 
             currentAgency={agency} 
             stopPassages={stopPassages}
-            operatorName={activeLineOperator}
           />
         </div>
+
+        {/* Lista med valda linjer (Taggar/Chips) */}
+        {selectedRoutes.length > 0 && (
+            <div className="flex flex-wrap justify-center gap-2 pointer-events-auto max-w-3xl animate-in fade-in slide-in-from-top-2 duration-300 items-center">
+                {selectedRoutes.map(route => {
+                    const color = getLineColor(route.line, route.agency);
+                    const operator = slService.getContractor(route.id) || (route.agency === 'WAAB' ? 'Blidösundsbolaget' : 'Okänd');
+                    
+                    return (
+                        <div key={route.id} className="flex items-center gap-2 bg-slate-900/90 backdrop-blur-md text-white pl-3 pr-2 py-1.5 rounded-full shadow-lg border border-white/10 group hover:bg-slate-800 transition-colors">
+                            <div className="flex items-center gap-2">
+                                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}` }}></div>
+                                <div className="flex flex-col leading-none">
+                                    <span className="text-xs font-bold whitespace-nowrap">
+                                        Linje {route.line}
+                                    </span>
+                                    {/* Visa entreprenör här */}
+                                    <div className="flex items-center gap-1 text-[9px] text-slate-400 font-medium">
+                                        <Building2 className="w-2.5 h-2.5" />
+                                        <span className="truncate max-w-[80px] uppercase tracking-wide">{operator}</span>
+                                    </div>
+                                </div>
+                                <div className="h-4 w-px bg-white/10 mx-1"></div>
+                                <span className="text-[10px] text-slate-300 font-medium max-w-[100px] truncate hidden sm:block">
+                                    {route.stops[0].name} - {route.stops[route.stops.length-1].name}
+                                </span>
+                            </div>
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); handleRemoveRoute(route.id); }}
+                                className="p-1 hover:bg-white/10 rounded-full transition-colors ml-1"
+                            >
+                                <X className="w-3.5 h-3.5 text-slate-400 group-hover:text-white" />
+                            </button>
+                        </div>
+                    );
+                })}
+                
+                {/* Rensa alla knapp */}
+                <button 
+                    onClick={handleClear}
+                    className="flex items-center gap-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 px-3 py-1.5 rounded-full shadow-lg border border-red-500/20 backdrop-blur-md transition-all text-xs font-bold active:scale-95 group"
+                >
+                    <Trash2 className="w-3 h-3 group-hover:text-red-300" />
+                    <span className="group-hover:text-red-300">Rensa alla</span>
+                </button>
+            </div>
+        )}
       </div>
 
-      {/* Status-paneler i nederkant - Responsivitet justerad till 'sm' brytpunkt */}
+      {/* Status-paneler (Live status & Sök) */}
       <div className="absolute bottom-6 left-6 right-6 z-[1000] flex flex-col sm:flex-row justify-between items-end gap-4 pointer-events-none">
         {/* Live Status (Vänster) */}
         <div className="bg-slate-900/90 backdrop-blur-xl p-4 rounded-2xl shadow-2xl border border-white/10 pointer-events-auto w-full sm:w-auto sm:min-w-[280px]">
@@ -300,10 +395,14 @@ const App: React.FC = () => {
             <div className="space-y-4">
                 <div className="flex items-center justify-between gap-4 px-1">
                     <span className="text-xs text-slate-300 font-bold">
-                        {activeRoute ? `Fordon på linje ${activeRoute.line}` : 'Fordon i trafik'}
+                        {selectedRoutes.length > 0 
+                            ? `Fordon på valda linjer` 
+                            : 'Fordon i trafik'}
                     </span>
                     <span className="text-xs text-white font-bold bg-slate-800/50 px-2.5 py-1.5 rounded-xl border border-white/5 shadow-inner">
-                        {activeRoute ? vehicles.filter(v => v.line === activeRoute.id).length : vehicles.length}
+                        {selectedRoutes.length > 0 
+                            ? vehicles.filter(v => selectedRoutes.some(r => r.id === v.line)).length 
+                            : vehicles.length}
                     </span>
                 </div>
                 
@@ -326,19 +425,18 @@ const App: React.FC = () => {
                 setSelectedVehicleId(null);
                 setHistory([]);
                 
-                // Hämta ruttdata för det hittade fordonet för att centrera kartan
-                const r = await slService.getLineRoute(routeId);
-                if (r) {
-                  setActiveRoute(r);
-                  const b = L.latLngBounds(r.path);
-                  setMapConfig({ 
-                    center: [b.getCenter().lat, b.getCenter().lng], 
-                    zoom: 12, 
-                    bounds: b 
-                  });
+                if (!selectedRoutes.some(r => r.id === routeId)) {
+                    const r = await slService.getLineRoute(routeId);
+                    if (r) {
+                        setSelectedRoutes(prev => [...prev, r]);
+                        const b = L.latLngBounds(r.path);
+                        setMapConfig({ 
+                            center: [b.getCenter().lat, b.getCenter().lng], 
+                            zoom: 12, 
+                            bounds: b 
+                        });
+                    }
                 }
-                
-                // Markera fordonet efter en kort fördröjning så att kartan hunnit uppdateras
                 setTimeout(() => setSelectedVehicleId(v.id), 50);
               }} 
             />
@@ -349,46 +447,61 @@ const App: React.FC = () => {
         <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
         <MapController center={mapConfig.center} zoom={mapConfig.zoom} bounds={mapConfig.bounds} />
         
-        {activeRoute && <Polyline positions={activeRoute.path} color={agency === 'WAAB' ? "#0891b2" : "#3b82f6"} weight={6} opacity={0.6} />}
-        
-        {activeRoute && activeRoute.stops.map(s => {
-            const passage = stopPassages.get(s.id);
-            let markerFill = "#ffffff";
-            if (passage) {
-                markerFill = passage.stopped ? "#10b981" : "#f59e0b";
-            }
+        {/* Rendera alla valda rutter - Använd standardfärger för linjer */}
+        {selectedRoutes.map(route => {
+            // Standardfärg för linjesträckning och hållplatser (Blå för SL, Cyan för WAAB)
+            const standardColor = route.agency === 'WAAB' ? "#0891b2" : "#3b82f6";
             
             return (
-                <CircleMarker 
-                    key={`${s.id}-${markerFill}`}
-                    center={[s.lat, s.lng]} 
-                    radius={passage ? 8 : 6}
-                    fillColor={markerFill}
-                    fillOpacity={1} 
-                    color={agency === 'WAAB' ? "#0891b2" : "#3b82f6"} 
-                    weight={2} 
-                    eventHandlers={{ click: () => setActiveStop(s) }}
-                >
-                    <Tooltip direction="top" offset={[0, -10]} opacity={0.9} className="custom-tooltip">
-                        <div className="p-1 font-sans">
-                            <div className="text-xs font-bold text-slate-900">{s.name}</div>
-                            {passage && (
-                                <div className="mt-1 flex flex-col gap-0.5">
-                                    <div className={`flex items-center gap-1.5 text-[10px] font-bold ${passage.stopped ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                        <Clock className="w-3 h-3" />
-                                        {passage.stopped ? 'Stannade' : 'Passerade'} {passage.time}
-                                    </div>
-                                    {passage.duration && (
-                                        <div className="flex items-center gap-1.5 text-[9px] text-slate-500 font-bold pl-4">
-                                            <Timer className="w-2.5 h-2.5" />
-                                            Stopptid: {passage.duration}
+            <React.Fragment key={route.id}>
+                <Polyline 
+                    positions={route.path} 
+                    color={standardColor} 
+                    weight={6} 
+                    opacity={0.6} 
+                />
+                {route.stops.map(s => {
+                    const passage = stopPassages.get(s.id);
+                    let markerFill = "#ffffff";
+                    if (passage) {
+                        markerFill = passage.stopped ? "#10b981" : "#f59e0b";
+                    }
+                    
+                    return (
+                        <CircleMarker 
+                            key={`${route.id}-${s.id}-${markerFill}`}
+                            center={[s.lat, s.lng]} 
+                            radius={passage ? 8 : 5}
+                            fillColor={markerFill}
+                            fillOpacity={1} 
+                            color={standardColor} 
+                            weight={2} 
+                            eventHandlers={{ click: () => setActiveStop(s) }}
+                        >
+                            <Tooltip direction="top" offset={[0, -10]} opacity={0.9} className="custom-tooltip">
+                                <div className="p-1 font-sans">
+                                    <div className="text-xs font-bold text-slate-900">{s.name}</div>
+                                    <div className="text-[10px] text-slate-500 font-semibold">Linje {route.line}</div>
+                                    {passage && (
+                                        <div className="mt-1 flex flex-col gap-0.5">
+                                            <div className={`flex items-center gap-1.5 text-[10px] font-bold ${passage.stopped ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                                <Clock className="w-3 h-3" />
+                                                {passage.stopped ? 'Stannade' : 'Passerade'} {passage.time}
+                                            </div>
+                                            {passage.duration && (
+                                                <div className="flex items-center gap-1.5 text-[9px] text-slate-500 font-bold pl-4">
+                                                    <Timer className="w-2.5 h-2.5" />
+                                                    Stopptid: {passage.duration}
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>
-                            )}
-                        </div>
-                    </Tooltip>
-                </CircleMarker>
+                            </Tooltip>
+                        </CircleMarker>
+                    );
+                })}
+            </React.Fragment>
             );
         })}
 
@@ -404,7 +517,8 @@ const App: React.FC = () => {
             />
         )}
         
-        {vehicles.filter(v => showAll || (activeRoute && v.line === activeRoute.id) || selectedVehicleId === v.id).map(v => {
+        {/* Fordon renderas med unika färger via VehicleMarker */}
+        {vehicles.filter(v => showAll || selectedRoutes.some(r => r.id === v.line) || selectedVehicleId === v.id).map(v => {
             return (
               <VehicleMarker 
                   key={v.id} 
