@@ -8,6 +8,7 @@ interface SearchBarProps {
   onSelect: (result: SearchResult) => void;
   onClear: () => void;
   activeRoute: SLLineRoute | null; // Finns kvar i interfacet men används inte visuellt i komponenten längre
+  selectedRoutes?: SLLineRoute[]; // Ny prop för att kunna filtrera sökning
   searchQuery: string;
   onSearchChange: (query: string) => void;
   placeholder?: string;
@@ -33,6 +34,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
   onSelect, 
   onClear, 
   activeRoute, 
+  selectedRoutes = [],
   searchQuery, 
   onSearchChange,
   placeholder = "Sök linje eller hållplats...",
@@ -47,20 +49,57 @@ const SearchBar: React.FC<SearchBarProps> = ({
 
   useEffect(() => {
     const fetchResults = async () => {
-      const q = searchQuery.trim();
+      const q = searchQuery.trim().toLowerCase();
+      
       if (q.length > 0) {
+        // 1. Gör alltid en global sökning först för att hitta LINJER (och hållplatser om inga filter finns)
         const globalResults = await slService.search(q, currentAgency);
-        // Filtrera bort linjer som redan är valda om activeRoute används? 
-        // För enkelhetens skull visar vi alla resultat så användaren ser vad som matchar.
-        setResults(globalResults);
+        
+        // Separera globala linjer
+        const foundLines = globalResults.filter(r => r.type === 'line');
+        let foundStops: SearchResult[] = [];
+
+        // 2. Hantera hållplatser
+        if (selectedRoutes.length > 0) {
+            // Om vi har valda rutter: Sök ENDAST bland hållplatser på dessa rutter (lokal filtrering)
+            // Detta gör att vi ignorerar globala hållplatser som inte ligger på linjen
+            const matchedStops = new Map<string, SearchResult>();
+            
+            selectedRoutes.forEach(route => {
+                route.stops.forEach(stop => {
+                    if (stop.name.toLowerCase().includes(q)) {
+                        if (!matchedStops.has(stop.id)) {
+                            matchedStops.set(stop.id, {
+                                type: 'stop',
+                                id: stop.id,
+                                title: stop.name,
+                                subtitle: 'Hållplats',
+                                agency: stop.agency || 'SL'
+                            });
+                        }
+                    }
+                });
+            });
+            foundStops = Array.from(matchedStops.values());
+        } else {
+            // Inga rutter valda: Använd de globala hållplatserna från sökningen
+            foundStops = globalResults.filter(r => r.type === 'stop');
+        }
+
+        // Slå ihop: Linjer (alltid globalt) + Hållplatser (globalt eller filtrerat)
+        // Lägg linjer först i listan
+        const finalResults = [...foundLines, ...foundStops];
+        
+        setResults(finalResults);
         if (!isSelectingRef.current) setShowDropdown(true);
+
       } else {
         setResults([]);
         setShowDropdown(false);
       }
     };
     fetchResults();
-  }, [searchQuery, currentAgency]);
+  }, [searchQuery, currentAgency, selectedRoutes]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -83,16 +122,21 @@ const SearchBar: React.FC<SearchBarProps> = ({
     }
   };
 
+  const hasActiveFilter = selectedRoutes.length > 0;
+  const currentPlaceholder = hasActiveFilter 
+    ? `Sök fler linjer eller hållplats...` 
+    : placeholder;
+
   return (
     <div ref={containerRef} className="flex flex-col gap-3 w-full">
       <div className="relative bg-slate-900/90 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/10 overflow-hidden">
         <div className="flex items-center px-4 py-3 gap-3">
-          <Search className="w-5 h-5 text-slate-400" />
+          <Search className={`w-5 h-5 ${hasActiveFilter ? 'text-blue-400' : 'text-slate-400'}`} />
           <div className="flex-1 bg-slate-800/50 rounded-xl px-3 py-2 border border-white/5 focus-within:border-blue-500/30 transition-all flex items-center gap-2">
             <input
               type="text"
               className="flex-1 bg-transparent text-white outline-none placeholder:text-slate-500 text-sm font-medium"
-              placeholder={placeholder}
+              placeholder={currentPlaceholder}
               value={searchQuery}
               onChange={(e) => {
                 isSelectingRef.current = false;

@@ -123,7 +123,7 @@ const VehicleMarker: React.FC<VehicleMarkerProps> = ({ vehicle, lineShortName, i
         iconSize: isNoBearing ? [40, 40] : [34, 34],
         iconAnchor: isNoBearing ? [20, 20] : [17, 17]
       });
-  }, [vehicle.bearing, lineShortName, vehicle.agency]); // Tog bort vehicle.line som dependency då vi använder lineShortName
+  }, [vehicle.bearing, lineShortName, vehicle.agency]); 
 
   useEffect(() => {
     if (markerRef.current) {
@@ -295,8 +295,6 @@ const App: React.FC = () => {
     } else {
         setSelectedVehicleId(null);
         setHistory([]);
-        setSelectedRoutes([]);
-
         const s = await slService.getStopInfo(res.id);
         if (s) { 
             setActiveStop(s); 
@@ -327,6 +325,7 @@ const App: React.FC = () => {
             onSelect={handleSelect} 
             onClear={handleClear} 
             activeRoute={null}
+            selectedRoutes={selectedRoutes} // Skicka med valda rutter för filtrering
             searchQuery={searchQuery} 
             onSearchChange={setSearchQuery} 
             currentAgency={agency} 
