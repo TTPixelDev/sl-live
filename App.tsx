@@ -7,7 +7,7 @@ import VehiclePopup from './components/VehiclePopup';
 import VehicleSearch from './components/VehicleSearch';
 import { slService, LineManifestEntry } from './services/slService';
 import { SLVehicle, SLLineRoute, SearchResult, SLStop, HistoryPoint } from './types';
-import { RefreshCw, Clock, Timer, X, Train, Ship, TramFront, Bus, Trash2, Building2, ArrowDown } from 'lucide-react';
+import { RefreshCw, Clock, Timer, X, Train, Ship, TramFront, Bus, Trash2, Building2, ArrowDown, TrainFront } from 'lucide-react';
 
 // Fix för Leaflet ikoner
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -76,6 +76,29 @@ const getLineColor = (lineString: string, agency?: string) => {
         if (isRedBus) return '#dc2626'; 
     }
     return '#2563eb'; // Default Blue
+};
+
+// Hjälpfunktion för att hämta ikon baserat på linje
+const getTransportIcon = (lineString: string, agency?: string) => {
+    if (agency === 'WAAB') return Ship;
+    const lineName = lineString.replace('Linje ', '').trim();
+    const num = parseInt(lineName);
+    
+    if (isNaN(num)) return Bus;
+
+    // Tunnelbana
+    if ([10, 11, 13, 14, 17, 18, 19].includes(num)) return TrainFront;
+
+    // Spårväg / Lokalbanor
+    if ([7, 12, 21, 30, 31].includes(num)) return TramFront;
+
+    // Tåg
+    if ([25, 26, 27, 28, 29, 40, 41, 42, 43, 44, 48].includes(num)) return Train;
+
+    // Båt
+    if ([80, 82, 83, 84, 89].includes(num)) return Ship;
+
+    return Bus;
 };
 
 interface VehicleMarkerProps {
@@ -344,10 +367,12 @@ const App: React.FC = () => {
                 {selectedRoutes.map(route => {
                     const color = getLineColor(route.line, route.agency);
                     const operator = slService.getContractor(route.id) || (route.agency === 'WAAB' ? 'Blidösundsbolaget' : 'Okänd');
+                    const TransportIcon = getTransportIcon(route.line, route.agency);
                     
                     return (
                         <div key={route.id} className="flex items-center gap-2 bg-slate-900/90 backdrop-blur-md text-white pl-3 pr-2 py-1.5 rounded-xl shadow-lg border border-white/10 group hover:bg-slate-800 transition-colors">
-                            <div className="w-2.5 h-2.5 rounded-full shrink-0 mt-0.5" style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}` }}></div>
+                            {/* Ersatt prick med Ikon */}
+                            <TransportIcon className="w-4 h-4 shrink-0 mt-0.5" style={{ color: color }} />
                             
                             <div className="flex flex-col min-w-0">
                                 <span className="text-xs font-bold whitespace-nowrap leading-none">

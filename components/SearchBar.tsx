@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, Loader2, MapPin, Bus, Ship } from 'lucide-react';
+import { Search, X, Loader2, MapPin, Bus, Ship, Train, TramFront, TrainFront } from 'lucide-react';
 import { slService } from '../services/slService';
 import { SearchResult, SLLineRoute } from '../types';
 
@@ -14,6 +14,45 @@ interface SearchBarProps {
   currentAgency: 'SL' | 'WAAB';
   stopPassages: Map<string, { time: string, stopped: boolean, duration?: string }>;
 }
+
+const getTransportIcon = (lineTitle: string, agency?: 'SL' | 'WAAB') => {
+  if (agency === 'WAAB') return <Ship className="w-5 h-5 text-cyan-500" />;
+  
+  const lineName = lineTitle.replace('Linje ', '').trim();
+  const num = parseInt(lineName);
+
+  // Om det inte är ett nummer (t.ex. ersättningsbussar med bokstäver), anta buss
+  if (isNaN(num)) return <Bus className="w-5 h-5 text-red-500" />;
+
+  // Tunnelbana (Blå, Röd, Grön)
+  if ([10, 11, 13, 14, 17, 18, 19].includes(num)) {
+    return <TrainFront className="w-5 h-5 text-blue-600" />; // Defaulting to generic color, specific styling happens elsewhere or via text-* classes
+  }
+
+  // Spårväg / Lokalbanor
+  if ([7, 12, 21, 30, 31].includes(num)) {
+    return <TramFront className="w-5 h-5 text-orange-600" />;
+  }
+
+  // Tåg (Pendeltåg, Roslagsbanan, Saltsjöbanan)
+  if ([25, 26, 27, 28, 29, 40, 41, 42, 43, 44, 48].includes(num)) {
+    return <Train className="w-5 h-5 text-pink-500" />;
+  }
+
+  // Pendelbåtar
+  if ([80, 82, 83, 84, 89].includes(num)) {
+    return <Ship className="w-5 h-5 text-cyan-600" />;
+  }
+
+  // Standard Buss (Röd eller Blå)
+  // Blåbussar
+  const blueBusLines = [1, 2, 3, 4, 5, 6, 172, 173, 176, 177, 178, 179, 471, 474, 670, 676, 677, 873, 875];
+  if (blueBusLines.includes(num)) {
+    return <Bus className="w-5 h-5 text-blue-600" />;
+  }
+
+  return <Bus className="w-5 h-5 text-red-600" />;
+};
 
 const SearchBar: React.FC<SearchBarProps> = ({
   onSelect,
@@ -71,12 +110,6 @@ const SearchBar: React.FC<SearchBarProps> = ({
     }
   };
 
-  const getIcon = (type: 'line' | 'stop') => {
-      if (type === 'stop') return <MapPin className="w-5 h-5 text-slate-400" />;
-      if (currentAgency === 'WAAB') return <Ship className="w-5 h-5 text-cyan-500" />;
-      return <Bus className="w-5 h-5 text-blue-500" />;
-  };
-
   return (
     <div ref={searchRef} className="relative w-full">
       <div className="relative">
@@ -120,7 +153,11 @@ const SearchBar: React.FC<SearchBarProps> = ({
               className="w-full text-left px-4 py-3 hover:bg-white/10 transition-colors flex items-center gap-3 border-b border-white/5 last:border-0 group"
             >
               <div className="shrink-0">
-                {getIcon(res.type)}
+                {res.type === 'stop' ? (
+                  <MapPin className="w-5 h-5 text-emerald-500" />
+                ) : (
+                  getTransportIcon(res.title, res.agency)
+                )}
               </div>
               <div className="flex flex-col min-w-0">
                 <span className="text-sm font-bold text-white group-hover:text-blue-200 transition-colors truncate">
