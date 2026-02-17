@@ -7,7 +7,7 @@ import VehiclePopup from './components/VehiclePopup';
 import VehicleSearch from './components/VehicleSearch';
 import { slService, LineManifestEntry } from './services/slService';
 import { SLVehicle, SLLineRoute, SearchResult, SLStop, HistoryPoint } from './types';
-import { RefreshCw, Clock, Timer, X, Train, Ship, TramFront, Bus, Trash2, Building2 } from 'lucide-react';
+import { RefreshCw, Clock, Timer, X, Train, Ship, TramFront, Bus, Trash2, Building2, ArrowDown } from 'lucide-react';
 
 // Fix för Leaflet ikoner
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -293,12 +293,17 @@ const App: React.FC = () => {
             setMapConfig({ center: [b.getCenter().lat, b.getCenter().lng], zoom: 12, bounds: b }); 
         }
     } else {
+        // Hållplats vald
+        // Behåll valda linjer, men rensa vald fordonshistorik för att fokusera på platsen
         setSelectedVehicleId(null);
         setHistory([]);
+        // Notera: Vi kör inte setSelectedRoutes([]) här längre
+
         const s = await slService.getStopInfo(res.id);
         if (s) { 
             setActiveStop(s); 
-            setMapConfig({ center: [s.lat, s.lng], zoom: 14 }); 
+            // Zooma in närmare (16) istället för 14
+            setMapConfig({ center: [s.lat, s.lng], zoom: 16 }); 
         }
     }
   };
@@ -335,30 +340,35 @@ const App: React.FC = () => {
 
         {/* Lista med valda linjer (Taggar/Chips) */}
         {selectedRoutes.length > 0 && (
-            <div className="flex flex-wrap justify-center gap-2 pointer-events-auto max-w-3xl animate-in fade-in slide-in-from-top-2 duration-300 items-center">
+            <div className="flex flex-wrap justify-center gap-2 pointer-events-auto max-w-3xl animate-in fade-in slide-in-from-top-2 duration-300 items-start">
                 {selectedRoutes.map(route => {
                     const color = getLineColor(route.line, route.agency);
                     const operator = slService.getContractor(route.id) || (route.agency === 'WAAB' ? 'Blidösundsbolaget' : 'Okänd');
                     
                     return (
-                        <div key={route.id} className="flex items-center gap-2 bg-slate-900/90 backdrop-blur-md text-white pl-3 pr-2 py-1.5 rounded-full shadow-lg border border-white/10 group hover:bg-slate-800 transition-colors">
-                            <div className="flex items-center gap-2">
-                                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}` }}></div>
-                                <div className="flex flex-col leading-none">
-                                    <span className="text-xs font-bold whitespace-nowrap">
-                                        Linje {route.line}
-                                    </span>
-                                    {/* Visa entreprenör här */}
-                                    <div className="flex items-center gap-1 text-[9px] text-slate-400 font-medium">
-                                        <Building2 className="w-2.5 h-2.5" />
-                                        <span className="truncate max-w-[80px] uppercase tracking-wide">{operator}</span>
-                                    </div>
-                                </div>
-                                <div className="h-4 w-px bg-white/10 mx-1"></div>
-                                <span className="text-[10px] text-slate-300 font-medium max-w-[100px] truncate hidden sm:block">
-                                    {route.stops[0].name} - {route.stops[route.stops.length-1].name}
+                        <div key={route.id} className="flex items-center gap-2 bg-slate-900/90 backdrop-blur-md text-white pl-3 pr-2 py-1.5 rounded-xl shadow-lg border border-white/10 group hover:bg-slate-800 transition-colors">
+                            <div className="w-2.5 h-2.5 rounded-full shrink-0 mt-0.5" style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}` }}></div>
+                            
+                            <div className="flex flex-col min-w-0">
+                                <span className="text-xs font-bold whitespace-nowrap leading-none">
+                                    Linje {route.line}
+                                </span>
+                                <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider leading-none truncate max-w-[60px]">
+                                    {operator}
                                 </span>
                             </div>
+
+                            <div className="h-6 w-px bg-white/10 mx-1"></div>
+                            
+                            <div className="flex flex-col min-w-0 leading-tight">
+                                <span className="text-[10px] text-slate-300 font-medium truncate max-w-[100px]">
+                                    {route.stops[0].name}
+                                </span>
+                                <span className="text-[10px] text-slate-300 font-medium truncate max-w-[100px]">
+                                    {route.stops[route.stops.length-1].name}
+                                </span>
+                            </div>
+                            
                             <button 
                                 onClick={(e) => { e.stopPropagation(); handleRemoveRoute(route.id); }}
                                 className="p-1 hover:bg-white/10 rounded-full transition-colors ml-1"
@@ -369,13 +379,13 @@ const App: React.FC = () => {
                     );
                 })}
                 
-                {/* Rensa alla knapp */}
+                {/* Rensa alla knapp - Uppdaterad design */}
                 <button 
                     onClick={handleClear}
-                    className="flex items-center gap-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 px-3 py-1.5 rounded-full shadow-lg border border-red-500/20 backdrop-blur-md transition-all text-xs font-bold active:scale-95 group"
+                    className="flex items-center gap-2 bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white px-3 py-2.5 rounded-xl shadow-lg border border-white/10 backdrop-blur-md transition-all text-xs font-bold active:scale-95 group h-full self-stretch"
                 >
-                    <Trash2 className="w-3 h-3 group-hover:text-red-300" />
-                    <span className="group-hover:text-red-300">Rensa alla</span>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Rensa alla</span>
                 </button>
             </div>
         )}

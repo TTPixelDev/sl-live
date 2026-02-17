@@ -1,202 +1,141 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Bus, MapPin, X, Train, Ship, TramFront, TrainFront, Clock, Timer, Building2 } from 'lucide-react';
+import { Search, X, Loader2, MapPin, Bus, Ship } from 'lucide-react';
 import { slService } from '../services/slService';
 import { SearchResult, SLLineRoute } from '../types';
 
 interface SearchBarProps {
-  onSelect: (result: SearchResult) => void;
+  onSelect: (res: SearchResult) => void;
   onClear: () => void;
-  activeRoute: SLLineRoute | null; // Finns kvar i interfacet men används inte visuellt i komponenten längre
-  selectedRoutes?: SLLineRoute[]; // Ny prop för att kunna filtrera sökning
+  activeRoute: SLLineRoute | null;
+  selectedRoutes: SLLineRoute[];
   searchQuery: string;
   onSearchChange: (query: string) => void;
-  placeholder?: string;
   currentAgency: 'SL' | 'WAAB';
-  stopPassages?: Map<string, { time: string, stopped: boolean, duration?: string }>;
-  operatorName?: string | null;
+  stopPassages: Map<string, { time: string, stopped: boolean, duration?: string }>;
 }
 
-const getTransportIcon = (lineString: string, agency?: 'SL' | 'WAAB') => {
-  if (agency === 'WAAB') return <Ship className="w-5 h-5 text-white" />;
-  const lineName = lineString.replace('Linje ', '').trim();
-  if (/[a-zA-Z]/.test(lineName)) return <Bus className="w-5 h-5 text-white" />;
-  const num = parseInt(lineName);
-  if (isNaN(num)) return <Bus className="w-5 h-5 text-white" />;
-  if ([10, 11, 13, 14, 17, 18, 19].includes(num)) return <TrainFront className="w-5 h-5 text-white" />;
-  if ([7, 12, 30, 31, 21, 25, 26, 27, 28, 29].includes(num)) return <TramFront className="w-5 h-5 text-white" />;
-  if ([40, 41, 42, 43, 44, 48].includes(num)) return <Train className="w-5 h-5 text-white" />;
-  if ([80, 82, 83, 84, 89].includes(num)) return <Ship className="w-5 h-5 text-white" />;
-  return <Bus className="w-5 h-5 text-white" />;
-};
-
-const SearchBar: React.FC<SearchBarProps> = ({ 
-  onSelect, 
-  onClear, 
-  activeRoute, 
-  selectedRoutes = [],
-  searchQuery, 
+const SearchBar: React.FC<SearchBarProps> = ({
+  onSelect,
+  searchQuery,
   onSearchChange,
-  placeholder = "Sök linje eller hållplats...",
   currentAgency,
-  stopPassages,
-  operatorName
 }) => {
   const [results, setResults] = useState<SearchResult[]>([]);
-  const [showDropdown, setShowDropdown] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const isSelectingRef = useRef(false);
+  const [loading, setLoading] = useState(false);
+  const [showResults, setShowResults] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const fetchResults = async () => {
-      const q = searchQuery.trim().toLowerCase();
-      
-      if (q.length > 0) {
-        // 1. Gör alltid en global sökning först för att hitta LINJER (och hållplatser om inga filter finns)
-        const globalResults = await slService.search(q, currentAgency);
-        
-        // Separera globala linjer
-        const foundLines = globalResults.filter(r => r.type === 'line');
-        let foundStops: SearchResult[] = [];
-
-        // 2. Hantera hållplatser
-        if (selectedRoutes.length > 0) {
-            // Om vi har valda rutter: Sök ENDAST bland hållplatser på dessa rutter (lokal filtrering)
-            // Detta gör att vi ignorerar globala hållplatser som inte ligger på linjen
-            const matchedStops = new Map<string, SearchResult>();
-            
-            selectedRoutes.forEach(route => {
-                route.stops.forEach(stop => {
-                    if (stop.name.toLowerCase().includes(q)) {
-                        if (!matchedStops.has(stop.id)) {
-                            matchedStops.set(stop.id, {
-                                type: 'stop',
-                                id: stop.id,
-                                title: stop.name,
-                                subtitle: 'Hållplats',
-                                agency: stop.agency || 'SL'
-                            });
-                        }
-                    }
-                });
-            });
-            foundStops = Array.from(matchedStops.values());
-        } else {
-            // Inga rutter valda: Använd de globala hållplatserna från sökningen
-            foundStops = globalResults.filter(r => r.type === 'stop');
+    const timer = setTimeout(async () => {
+      if (searchQuery.trim().length > 0) {
+        setLoading(true);
+        try {
+          const res = await slService.search(searchQuery, currentAgency);
+          setResults(res);
+          setShowResults(true);
+        } catch (e) {
+          console.error("Search failed", e);
+        } finally {
+          setLoading(false);
         }
-
-        // Slå ihop: Linjer (alltid globalt) + Hållplatser (globalt eller filtrerat)
-        // Lägg linjer först i listan
-        const finalResults = [...foundLines, ...foundStops];
-        
-        setResults(finalResults);
-        if (!isSelectingRef.current) setShowDropdown(true);
-
       } else {
         setResults([]);
-        setShowDropdown(false);
+        setShowResults(false);
       }
-    };
-    fetchResults();
-  }, [searchQuery, currentAgency, selectedRoutes]);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, currentAgency]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setShowDropdown(false);
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+        setShowResults(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const handleResultClick = (res: SearchResult) => {
+    onSelect(res);
+    setShowResults(false);
+    onSearchChange('');
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && results.length > 0 && showDropdown) {
+    if (e.key === 'Enter' && results.length > 0) {
       e.preventDefault();
-      const topResult = results[0];
-      isSelectingRef.current = true;
-      onSelect(topResult);
-      setShowDropdown(false);
-      onSearchChange('');
+      handleResultClick(results[0]);
     }
   };
 
-  const hasActiveFilter = selectedRoutes.length > 0;
-  const currentPlaceholder = hasActiveFilter 
-    ? `Sök fler linjer eller hållplats...` 
-    : placeholder;
+  const getIcon = (type: 'line' | 'stop') => {
+      if (type === 'stop') return <MapPin className="w-5 h-5 text-slate-400" />;
+      if (currentAgency === 'WAAB') return <Ship className="w-5 h-5 text-cyan-500" />;
+      return <Bus className="w-5 h-5 text-blue-500" />;
+  };
 
   return (
-    <div ref={containerRef} className="flex flex-col gap-3 w-full">
-      <div className="relative bg-slate-900/90 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/10 overflow-hidden">
-        <div className="flex items-center px-4 py-3 gap-3">
-          <Search className={`w-5 h-5 ${hasActiveFilter ? 'text-blue-400' : 'text-slate-400'}`} />
-          <div className="flex-1 bg-slate-800/50 rounded-xl px-3 py-2 border border-white/5 focus-within:border-blue-500/30 transition-all flex items-center gap-2">
-            <input
-              type="text"
-              className="flex-1 bg-transparent text-white outline-none placeholder:text-slate-500 text-sm font-medium"
-              placeholder={currentPlaceholder}
-              value={searchQuery}
-              onChange={(e) => {
-                isSelectingRef.current = false;
-                onSearchChange(e.target.value);
-              }}
-              onFocus={() => { if (searchQuery.length > 0) setShowDropdown(true); }}
-              onKeyDown={handleKeyDown}
-            />
-            {searchQuery && (
-              <button onClick={() => { onSearchChange(''); }} className="p-1 hover:bg-slate-700 rounded-full transition-colors">
-                <X className="w-4 h-4 text-slate-400" />
-              </button>
-            )}
-          </div>
+    <div ref={searchRef} className="relative w-full">
+      <div className="relative">
+        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+          {loading ? (
+            <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+          ) : (
+            <Search className="h-5 w-5 text-slate-400" />
+          )}
         </div>
-
-        {showDropdown && results.length > 0 && (
-          <div className="border-t border-white/5 max-h-[60vh] overflow-y-auto bg-slate-900/40">
-            {results.map((result) => {
-              const passage = stopPassages?.get(result.id);
-              const iconContainerColor = result.type === 'line' ? 'bg-blue-500/10' : 'bg-emerald-500/10';
-              const TransportIcon = result.type === 'line' ? getTransportIcon(result.title, result.agency) : <MapPin className="w-5 h-5 text-emerald-500" />;
-
-              return (
-                <button
-                  key={`${result.type}-${result.id}`}
-                  onClick={() => {
-                    isSelectingRef.current = true;
-                    onSelect(result);
-                    setShowDropdown(false);
-                    onSearchChange('');
-                  }}
-                  className="w-full flex items-center justify-between gap-4 px-5 py-4 hover:bg-white/5 transition-colors text-left border-b border-white/[0.02] last:border-0 group"
-                >
-                  <div className="flex items-center gap-4 flex-1 min-w-0">
-                    <div className={`p-2.5 rounded-xl ${iconContainerColor} flex items-center justify-center transition-colors group-hover:bg-opacity-20`}>
-                      {result.type === 'line' ? 
-                        React.cloneElement(TransportIcon as React.ReactElement<any>, { className: 'w-5 h-5 text-blue-400' }) : 
-                        TransportIcon
-                      }
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-bold text-white truncate">{result.title}</div>
-                      <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{result.subtitle}</div>
-                    </div>
-                  </div>
-                  {passage && (
-                    <div className="text-right flex flex-col items-end gap-0.5 shrink-0">
-                        <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-1 rounded-lg">
-                            <Clock className="w-3.5 h-3.5" />
-                            {passage.stopped ? 'Stannade' : 'Passerade'} {passage.time}
-                        </div>
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+        <input
+          type="text"
+          className="block w-full pl-10 pr-10 py-3 border border-white/10 rounded-2xl leading-5 bg-slate-900/95 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 sm:text-sm backdrop-blur-xl shadow-2xl transition-all"
+          placeholder={currentAgency === 'WAAB' ? "Sök linje eller brygga..." : "Sök linje eller hållplats..."}
+          value={searchQuery}
+          onChange={(e) => onSearchChange(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onFocus={() => {
+              if (searchQuery.trim().length > 0) setShowResults(true);
+          }}
+        />
+        {searchQuery && (
+          <button
+            onClick={() => {
+                onSearchChange('');
+                setResults([]);
+            }}
+            className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-white transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
         )}
       </div>
+
+      {showResults && results.length > 0 && (
+        <div className="absolute mt-2 w-full bg-slate-900/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl max-h-[60vh] overflow-y-auto z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+          {results.map((res) => (
+            <button
+              key={`${res.type}-${res.id}`}
+              onClick={() => handleResultClick(res)}
+              className="w-full text-left px-4 py-3 hover:bg-white/10 transition-colors flex items-center gap-3 border-b border-white/5 last:border-0 group"
+            >
+              <div className="shrink-0">
+                {getIcon(res.type)}
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="text-sm font-bold text-white group-hover:text-blue-200 transition-colors truncate">
+                    {res.title}
+                </span>
+                {res.subtitle && (
+                    <span className="text-xs text-slate-400 truncate">
+                        {res.subtitle}
+                    </span>
+                )}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
