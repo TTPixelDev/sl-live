@@ -59,6 +59,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
   searchQuery,
   onSearchChange,
   currentAgency,
+  selectedRoutes,
 }) => {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -66,12 +67,47 @@ const SearchBar: React.FC<SearchBarProps> = ({
   const searchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Sänkt timeout till 100ms för snabbare respons
     const timer = setTimeout(async () => {
-      if (searchQuery.trim().length > 0) {
+      // Säkerställ att vi söker om det finns minst 1 tecken (även whitespace trimmat)
+      if (searchQuery && searchQuery.trim().length > 0) {
         setLoading(true);
         try {
           const res = await slService.search(searchQuery, currentAgency);
-          setResults(res);
+          
+          let finalResults: SearchResult[] = [];
+
+          if (selectedRoutes.length > 0) {
+              // 1. Behåll linjer från den globala sökningen så man kan lägga till fler
+              const matchingLines = res.filter(r => r.type === 'line');
+              
+              // 2. Sök lokalt bland hållplatserna på de VALDA linjerna
+              // Detta garanterar att vi hittar hållplatser även om slService returnerar för många linjer
+              const queryLower = searchQuery.toLowerCase();
+              const matchedStops = new Map<string, SearchResult>();
+              
+              selectedRoutes.forEach(route => {
+                  route.stops.forEach(stop => {
+                      if (stop.name.toLowerCase().includes(queryLower)) {
+                          if (!matchedStops.has(stop.id)) {
+                              matchedStops.set(stop.id, {
+                                  type: 'stop',
+                                  id: stop.id,
+                                  title: stop.name,
+                                  subtitle: currentAgency === 'WAAB' ? 'Brygga' : 'Hållplats',
+                                  agency: stop.agency || 'SL'
+                              });
+                          }
+                      }
+                  });
+              });
+              
+              finalResults = [...matchingLines, ...Array.from(matchedStops.values())];
+          } else {
+              finalResults = res;
+          }
+
+          setResults(finalResults);
           setShowResults(true);
         } catch (e) {
           console.error("Search failed", e);
@@ -82,10 +118,10 @@ const SearchBar: React.FC<SearchBarProps> = ({
         setResults([]);
         setShowResults(false);
       }
-    }, 300);
+    }, 100);
 
     return () => clearTimeout(timer);
-  }, [searchQuery, currentAgency]);
+  }, [searchQuery, currentAgency, selectedRoutes]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

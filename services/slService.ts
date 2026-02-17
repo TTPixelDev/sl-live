@@ -161,14 +161,16 @@ class SLService {
             const cursor = (e.target as any).result;
             if (cursor) {
                 const r = cursor.value as LineManifestEntry;
-                if (r.line.toLowerCase().startsWith(q) && r.agency === currentAgency) {
+                // Begränsa antalet linjer till 50 så att vi inte fyller resultatet med bara linjer
+                if (results.length < 50 && r.line.toLowerCase().includes(q) && r.agency === currentAgency) {
                     results.push({ type: 'line', id: r.id, title: `Linje ${r.line}`, subtitle: `${r.from} - ${r.to}`, agency: r.agency });
                 }
                 cursor.continue();
             } else {
                 tx.objectStore('stops').openCursor().onsuccess = (e2) => {
                     const c2 = (e2.target as any).result;
-                    if (c2 && results.length < 15) {
+                    // Tillåt upp till 100 resultat totalt för att ge plats åt hållplatser
+                    if (c2 && results.length < 100) {
                         const s = c2.value as SLStop;
                         const stopAgency = s.agency || 'SL';
                         if (s.name.toLowerCase().includes(q) && stopAgency === currentAgency) {
