@@ -235,7 +235,7 @@ const App: React.FC = () => {
 
   const stopPassages = useMemo(() => {
     if (selectedRoutes.length === 0 || history.length === 0) return new Map();
-    const passages = new Map<string, { time: string, stopped: boolean, duration?: string }>();
+    const passages = new Map<string, { time: string, stopped: boolean, duration?: string, departureTime?: string }>();
     
     selectedRoutes.forEach(route => {
         route.stops.forEach(stop => {
@@ -249,6 +249,7 @@ const App: React.FC = () => {
                 const strictPoints = anyNearbyPoints.filter(p => getDistance(p.lat, p.lng, stop.lat, stop.lng) < 35);
                 let isActuallyStopped = false;
                 let durationStr = "";
+                let departureTimeStr = "";
 
                 if (strictPoints.length >= 2) {
                     const durationSec = Math.round((strictPoints[strictPoints.length - 1].ts - strictPoints[0].ts) / 1000);
@@ -257,13 +258,15 @@ const App: React.FC = () => {
                         const mins = Math.floor(durationSec / 60);
                         const secs = durationSec % 60;
                         durationStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+                        departureTimeStr = new Date(strictPoints[strictPoints.length - 1].ts).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
                     }
                 }
 
                 passages.set(stop.id, {
                     time: arrivalTime,
                     stopped: isActuallyStopped,
-                    duration: durationStr
+                    duration: durationStr,
+                    departureTime: departureTimeStr
                 });
             }
         });
@@ -518,14 +521,23 @@ const App: React.FC = () => {
                                     <div className="text-[10px] text-slate-500 font-semibold">Linje {route.line}</div>
                                     {passage && (
                                         <div className="mt-1 flex flex-col gap-0.5">
-                                            <div className={`flex items-center gap-1.5 text-[10px] font-bold ${passage.stopped ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                                <Clock className="w-3 h-3" />
-                                                {passage.stopped ? 'Stannade' : 'Passerade'} {passage.time}
-                                            </div>
-                                            {passage.duration && (
-                                                <div className="flex items-center gap-1.5 text-[9px] text-slate-500 font-bold pl-4">
-                                                    <Timer className="w-2.5 h-2.5" />
-                                                    Stopptid: {passage.duration}
+                                            {passage.stopped ? (
+                                                <>
+                                                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600">
+                                                        <Clock className="w-3 h-3" />
+                                                        Ankom: {passage.time} ({passage.duration})
+                                                    </div>
+                                                    {passage.departureTime && (
+                                                        <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600">
+                                                            <Clock className="w-3 h-3 opacity-0" />
+                                                            Avgick: {passage.departureTime}
+                                                        </div>
+                                                    )}
+                                                </>
+                                            ) : (
+                                                <div className="flex items-center gap-1.5 text-[10px] font-bold text-amber-600">
+                                                    <Clock className="w-3 h-3" />
+                                                    Passerade {passage.time}
                                                 </div>
                                             )}
                                         </div>
