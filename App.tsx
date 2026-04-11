@@ -244,7 +244,7 @@ const App: React.FC = () => {
             if (anyNearbyPoints.length > 0) {
                 anyNearbyPoints.sort((a, b) => a.ts - b.ts);
                 const first = anyNearbyPoints[0];
-                const arrivalTime = new Date(first.ts).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+                const arrivalTime = new Date(first.ts).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                 
                 const strictPoints = anyNearbyPoints.filter(p => getDistance(p.lat, p.lng, stop.lat, stop.lng) < 35);
                 let isActuallyStopped = false;
@@ -258,7 +258,7 @@ const App: React.FC = () => {
                         const mins = Math.floor(durationSec / 60);
                         const secs = durationSec % 60;
                         durationStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-                        departureTimeStr = new Date(strictPoints[strictPoints.length - 1].ts).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+                        departureTimeStr = new Date(strictPoints[strictPoints.length - 1].ts).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                     }
                 }
 
