@@ -212,7 +212,7 @@ const App: React.FC = () => {
       setVehicles(v);
     };
     fetchData();
-    const i = setInterval(fetchData, 10000);
+    const i = setInterval(fetchData, 1000);
     return () => clearInterval(i);
   }, [loading, agency]);
 
