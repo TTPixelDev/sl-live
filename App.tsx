@@ -243,8 +243,7 @@ const App: React.FC = () => {
             
             if (anyNearbyPoints.length > 0) {
                 anyNearbyPoints.sort((a, b) => a.ts - b.ts);
-                const first = anyNearbyPoints[0];
-                const arrivalTime = new Date(first.ts).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                let arrivalTime = new Date(anyNearbyPoints[0].ts).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                 
                 const strictPoints = anyNearbyPoints.filter(p => getDistance(p.lat, p.lng, stop.lat, stop.lng) < 35);
                 let isActuallyStopped = false;
@@ -255,6 +254,10 @@ const App: React.FC = () => {
                     const durationSec = Math.round((strictPoints[strictPoints.length - 1].ts - strictPoints[0].ts) / 1000);
                     if (durationSec > 10) {
                         isActuallyStopped = true;
+                        
+                        // Använd strictPoints för ankomsttid så att matematiken stämmer med stopptiden
+                        arrivalTime = new Date(strictPoints[0].ts).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                        
                         const mins = Math.floor(durationSec / 60);
                         const secs = durationSec % 60;
                         durationStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
