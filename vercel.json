@@ -2,16 +2,5 @@
 {
   "rewrites": [
     { "source": "/((?!api/.*).*)", "destination": "/index.html" }
-  ],
-  "crons": [
-    {
-      "path": "/api/cron",
-      "schedule": "* * * * *"
-    }
-  ],
-  "functions": {
-    "api/cron.ts": {
-      "maxDuration": 300
-    }
-  }
+  ]
 }
