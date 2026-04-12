@@ -195,6 +195,8 @@ const App: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showAll, setShowAll] = useState(false);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
+  const activeTripIdRef = useRef<string | null>(null);
+  const lastHistoryFetchRef = useRef<number>(0);
 
   useEffect(() => {
     (async () => {
@@ -217,20 +219,38 @@ const App: React.FC = () => {
   }, [loading, agency]);
 
   useEffect(() => {
+    let isActive = true;
+
     if (selectedVehicleId) {
         const v = vehicles.find(x => x.id === selectedVehicleId);
         if (v) {
-            slService.getVehicleHistory(v.tripId).then(setHistory);
+            const now = Date.now();
+            
+            // Hämta historik om det är en ny trip ELLER om det har gått mer än 5 sekunder
+            if (activeTripIdRef.current !== v.tripId || now - lastHistoryFetchRef.current >= 5000) {
+                activeTripIdRef.current = v.tripId;
+                lastHistoryFetchRef.current = now;
+                
+                slService.getVehicleHistory(v.tripId).then(h => {
+                    if (isActive) setHistory(h);
+                });
+            }
             
             if (!selectedRoutes.some(r => r.id === v.line)) {
                 slService.getLineRoute(v.line).then(r => {
-                    if (r) setSelectedRoutes(prev => [...prev, r]);
+                    if (isActive && r) setSelectedRoutes(prev => [...prev, r]);
                 });
             }
         }
     } else {
+        activeTripIdRef.current = null;
+        lastHistoryFetchRef.current = 0;
         setHistory([]);
     }
+
+    return () => {
+        isActive = false;
+    };
   }, [selectedVehicleId, vehicles]); 
 
   const stopPassages = useMemo(() => {
